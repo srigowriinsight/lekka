@@ -1,0 +1,38 @@
+{% from "partials/_m.html" import head_title, csrf, nextf, dmy %}
+{% set word = 'Received' if e.direction == 'IN' else 'Paid' %}
+<div class="pop">
+  {{ head_title('Mark as settled', e.path_titles()|join(' › ')) }}
+  <p style="margin:2px 0 8px">{{ 'Inflow' if e.direction == 'IN' else 'Outflow' }} · <b>₹{{ e.amount|inr }}</b> · planned {{ dmy(e.planned_date) }}</p>
+  <form method="post" action="{{ url_for('entries.settle', entry_id=e.id) }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}<input type="hidden" name="version" value="{{ e.version }}">
+    <div class="form-error"></div>
+    <label>{{ word }} on</label>
+    <div class="choices">
+      {% if e.planned_date <= today() %}
+        <label><input type="radio" name="when" value="planned" {{ 'checked' if e.planned_date < today() }}> On the planned date ({{ dmy(e.planned_date) }}) — for a tick that was forgotten</label>
+      {% endif %}
+      <label><input type="radio" name="when" value="today" {{ 'checked' if e.planned_date >= today() }}> Today ({{ dmy(today()) }}) — the money moved now</label>
+      <label><input type="radio" name="when" value="pick"> Pick a date</label>
+    </div>
+    <div data-show-when="when=pick"><input type="date" name="settled_on" max="{{ today().isoformat() }}" value="{{ today().isoformat() }}"></div>
+    {% if e.planned_date > today() %}<p class="muted" style="font-size:12.5px">The planned date is in the future, so the money counts on the date you choose here (paid early).</p>{% endif %}
+    {% if plans %}
+      <h3 style="margin:12px 0 4px">Is this the money for a plan you already have?</h3>
+      <p class="muted" style="font-size:12.5px;margin:0 0 6px">These {{ e.head.name }} items are still open. If this money is for one of them, Lekka ticks that plan instead and removes this entry, so it isn't counted twice.</p>
+      <div class="choices">
+        <label><input type="radio" name="link_to" value="none" checked> No, tick only this item</label>
+        {% for p in plans %}
+          <label><input type="radio" name="link_to" value="{{ p.id }}">
+            {{ p.path_titles()|join(' › ') }} · ₹{{ p.amount|inr }} · planned {{ dmy(p.planned_date) }}
+            {% if p.amount == e.amount %}<span class="pill s-SETTLED" style="margin-left:4px">same amount</span>
+            {% elif e.amount < p.amount %}<span class="muted"> · the rest (₹{{ (p.amount - e.amount)|inr }}) stays planned</span>
+            {% else %}<span class="muted"> · the extra ₹{{ (e.amount - p.amount)|inr }} is kept as its own ticked item</span>{% endif %}
+          </label>
+        {% endfor %}
+      </div>
+    {% endif %}
+    <label>Remarks (optional)</label><input name="remarks" class="full" maxlength="1000" placeholder="e.g. paid by NEFT">
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0">The money counts on the settled date; every balance from that date onwards is recalculated. The item stays linked to its planned date.</p>
+    <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary">Confirm</button></footer>
+  </form>
+</div>

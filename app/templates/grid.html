@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% from "partials/_m.html" import dmy %}
+{% block title %}Grid{% endblock %}
+{% block content %}
+{% set cur = request.full_path %}
+{% macro q() -%}
+{%- set base = {'freq': p.freq, 'start': p.start.isoformat(), 'end': p.end.isoformat(), 'filter': p.filter,
+               'hide_empty': '1' if p.hide_empty else '0', 'expand': '1' if p.expand_all else '0',
+               'compact': '1' if p.compact else '0', 'cc': p.cost_centre_id or '',
+               'custom': '1' if p.custom else '0'} -%}
+{%- set _ = base.update(kwargs) -%}
+{{ url_for('grid.index', **base) }}
+{%- endmacro %}
+{% macro amt(v) %}{{ v|inr(p.compact and p.freq != 'day') }}{% endmacro %}
+
+<div class="toolbar">
+  <div class="group">
+    {% for f, label in [('day','Day'),('week','Week'),('month','Month'),('quarter','Quarter'),('year','Year')] %}
+      <a href="{{ url_for('grid.index', freq=f, filter=p.filter, compact='1' if p.compact else '0') }}" class="{{ 'on' if p.freq == f and not p.custom }}">{{ label }}</a>
+    {% endfor %}
+    <a href="{{ q(freq='day', custom='1') }}" class="{{ 'on' if p.custom }}" title="Day columns for any dates you choose"
+       onclick="return lekkaCustom(this)">Custom</a>
+  </div>
+  <a class="btn small" href="{{ q(start=prev_range[0].isoformat(), end=prev_range[1].isoformat()) }}" title="Earlier">‹</a>
+  <form method="get" class="inline" style="display:flex;gap:6px;align-items:center">
+    <input type="hidden" name="freq" value="{{ p.freq }}">
+    <input type="hidden" name="filter" value="{{ p.filter }}">
+    <input type="hidden" name="hide_empty" value="{{ '1' if p.hide_empty else '0' }}">
+    <input type="hidden" name="expand" value="{{ '1' if p.expand_all else '0' }}">
+    <input type="hidden" name="compact" value="{{ '1' if p.compact else '0' }}">
+    <input type="hidden" name="custom" value="1">
+    <input type="date" name="start" id="range-from" value="{{ p.start.isoformat() }}" aria-label="From">
+    <span class="muted">to</span>
+    <input type="date" name="end" value="{{ p.end.isoformat() }}" aria-label="To">
+    <button class="small">Show</button>
+  </form>
+  <a class="btn small" href="{{ q(start=next_range[0].isoformat(), end=next_range[1].isoformat()) }}" title="Later">›</a>
+  <a class="btn small" href="{{ url_for('grid.index', freq=p.freq) }}">Today</a>
+  <span class="sep"></span>
+  <div class="group">
+    {% for f, label in [('all','All'),('pending','Pending'),('settled','Settled')] %}
+      <a href="{{ q(filter=f) }}" class="{{ 'on' if p.filter == f }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  {% if p.freq == 'day' %}
+  <a class="btn small" href="{{ q(hide_empty='0' if p.hide_empty else '1') }}">{{ 'Show empty days' if p.hide_empty else 'Hide empty days' }}</a>
+  {% else %}
+  <a class="btn small" href="{{ q(compact='0' if p.compact else '1') }}">{{ 'Full amounts' if p.compact else 'Compact amounts' }}</a>
+  {% endif %}
+  <button type="button" class="small" data-open="{{ '1' if p.expand_all else '0' }}"
+          onclick="var o = this.dataset.open !== '1'; lekkaExpandAll(o); this.dataset.open = o ? '1' : '0'; this.textContent = o ? 'Collapse all' : 'Expand all';">{{ 'Collapse all' if p.expand_all else 'Expand all' }}</button>
+  {% if show_cc and cost_centres %}
+  <form method="get" style="display:inline">
+    {% for k, v in request.args.items() if k != 'cc' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <select name="cc" onchange="this.form.submit()" aria-label="Cost centre">
+      <option value="">All cost centres</option>
+      {% for c in cost_centres %}<option value="{{ c.id }}" {{ 'selected' if p.cost_centre_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
+    </select>
+  </form>
+  {% endif %}
+  <span style="flex:1"></span>
+  <a class="btn small" href="{{ url_for('grid.export', **request.args) }}">Export to Excel</a>
+  <a class="btn small" href="#" data-dialog="{{ url_for('entries.new_form', direction='IN', next=cur) }}">+ Inflow</a>
+  <a class="btn small" href="#" data-dialog="{{ url_for('entries.new_form', direction='OUT', next=cur) }}">+ Outflow</a>
+</div>
+
+{% if not account_set %}
+<div class="panel" style="border-color:var(--warn-line);background:var(--warn-soft);margin-bottom:12px">
+  <b>Set up the account first.</b> Open <a href="{{ url_for('accounts.index') }}">Account</a> and enter the opening balance and
+  the date it applies from. Until then the opening date is {{ dmy(acc.opening_date) }}, and Lekka ignores anything dated before it.
+</div>
+{% endif %}
+{% if not g.columns %}
+  <div class="panel">Nothing to show for this range.</div>
+{% else %}
+<div class="grid-wrap">
+<table class="grid freq-{{ p.freq }}">
+  <thead>
+    <tr>
+      <th class="rowhead">{{ p.freq|title }} view</th>
+      {% for c in g.columns %}
+        <th class="{{ 'is-today' if c.start <= g.today <= c.end }}">{{ c.label }}</th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="basis"><td class="rowhead">Basis</td>
+      {% for c in g.columns %}
+        <td class="b-{{ c.basis }} {{ 'is-today' if c.start <= g.today <= c.end }}">
+          {% if c.start <= g.today <= c.end %}{{ 'Actual · today' if p.freq == 'day' else 'Actual to today, then planned' }}{% else %}{{ c.basis|title }}{% endif %}
+        </td>
+      {% endfor %}
+    </tr>
+    <tr class="bal"><td class="rowhead">Opening balance</td>
+      {% for c in g.columns %}<td class="{{ 'neg' if c.opening < 0 }} {{ 'is-today' if c.start <= g.today <= c.end }}">{{ amt(c.opening) }}</td>{% endfor %}
+    </tr>
+
+    {% for direction, label in [(IN, 'INFLOW'), (OUT, 'OUTFLOW')] %}
+      <tr class="band"><td class="rowhead">{{ label }}</td><td colspan="{{ g.columns|length }}"></td></tr>
+      {% for head, cells, items in g.rows[direction] %}
+        {% set key = direction ~ '-' ~ head.id %}
+        <tr class="head-row">
+          <td class="rowhead">
+            <button type="button" class="toggle" data-toggle="{{ key }}" aria-label="Show titles">{{ '▾' if p.expand_all else '▸' }}</button>{{ head.name }}
+            <a href="#" class="addhere" title="Add under {{ head.name }}"
+               data-dialog="{{ url_for('entries.new_form', direction=direction, head_id=head.id, next=cur) }}">+</a>
+          </td>
+          {% for c in g.columns %}
+            {% set i = loop.index0 %}
+            {% set cell = cells.get(i) %}
+            {% set newdate = (g.today if c.start <= g.today <= c.end else c.start).isoformat() %}
+            {% if cell %}
+              {% set whole = 'whole s-' ~ cell.single_status if (p.freq == 'day' and cell.count == 1) else '' %}
+              {% set one = cell.items[0] if cell.count == 1 else none %}
+              {% set editable = one is not none %}
+              <td class="cell {{ whole }} {{ 'only-cancelled' if cell.count == 0 }} {{ 'is-today' if c.start <= g.today <= c.end }}"
+                  {% if editable %}data-edit="{{ url_for('entries.quick_amount', entry_id=one.id) }}" data-version="{{ one.version }}" data-value="{{ one.amount|int if one.amount == one.amount|int else one.amount }}"{% endif %}
+                  data-dialog="{{ url_for('grid.cell', head=head.id, dir=direction, a=c.start.isoformat(), b=c.end.isoformat(), next=cur) }}"
+                  title="{% if editable %}Double-click to change the amount{{ ' (it stays ticked)' if one.is_settled }} · {% endif %}{% if cell.cancelled %}Cancelled ₹{{ cell.cancelled_amount|inr }} (not counted) · {% endif %}{% for s, v in cell.by_status.items() %}{{ s|replace('_',' ')|title }} ₹{{ v|inr }}{% if not loop.last %} · {% endif %}{% endfor %}{% if cell.shown != cell.amount %} · Not counted ₹{{ (cell.shown - cell.amount)|inr }}{% endif %}">
+                {% if cell.count > 1 %}<span class="cnt">×{{ cell.count }}</span>{% endif %}
+                {% if cell.count == 0 %}<span class="amt cancelled-amt" title="Cancelled: shown, never counted">{{ amt(cell.cancelled_amount) }}</span>
+                {% elif cell.amount %}<span class="amt">{{ amt(cell.amount) }}</span>
+                {% else %}<span class="amt notcounted" title="Shown, not counted until ticked or rescheduled">{{ amt(cell.shown) }}</span>{% endif %}
+                {% if cell.count and cell.cancelled %}<div class="cancelled-amt" style="font-size:11px" title="Cancelled in this cell">{{ amt(cell.cancelled_amount) }}</div>{% endif %}
+                {% if cell.count and not whole %}<div class="bar">{% for s, pct in cell.bar() %}<span class="b-{{ s }}" style="width:{{ pct }}%"></span>{% endfor %}</div>{% endif %}
+                {% if cell.has_overdue %}<span class="corner" title="Something in this cell is overdue"></span>{% endif %}
+              </td>
+            {% else %}
+              <td class="cell empty {{ 'is-today' if c.start <= g.today <= c.end }}" title="Double-click to add"
+                  data-new="{{ url_for('entries.new_form', direction=direction, head_id=head.id, date=newdate, next=cur) }}"></td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+        {% for it in items %}
+          {% set e = it.entry %}
+          <tr class="item-row" data-parent="{{ key }}" {{ '' if p.expand_all else 'hidden' }}>
+            {% set ed = (e.settled_on if e.is_settled else e.planned_date) %}
+            <td class="rowhead item-title" title="{{ e.path_titles()|join(' › ') }} · click for Tick, Reschedule, Split, Cancel, Delete"
+                {% if ed %}data-dialog="{{ url_for('grid.cell', head=head.id, dir=direction, a=ed.isoformat(), b=ed.isoformat(), entry=e.id, next=cur) }}"{% endif %}>{{ e.path_titles()|join(' › ') }}</td>
+            {% for c in g.columns %}
+              {% set ic = it.cells.get(loop.index0) %}
+              {% if ic %}
+                <td class="num c-{{ ic.status }}" data-dialog="{{ url_for('grid.cell', head=head.id, dir=direction, a=c.start.isoformat(), b=c.end.isoformat(), entry=e.id, next=cur) }}" style="cursor:pointer"
+                    {% if not e.is_cancelled %}data-edit="{{ url_for('entries.quick_amount', entry_id=e.id) }}" data-version="{{ e.version }}" data-value="{{ e.amount|int if e.amount == e.amount|int else e.amount }}"{% endif %}>
+                  <span class="{{ '' if ic.counted else 'notcounted' }}" title="{{ status_label(e) }}{{ '' if ic.counted else ' · not counted until ticked or rescheduled' }}">{{ amt(ic.amount) }}</span>
+                </td>
+              {% else %}<td></td>{% endif %}
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      {% endfor %}
+      <tr class="total"><td class="rowhead">Total {{ label|lower }}</td>
+        {% for c in g.columns %}
+          {% set v = c.total_in if direction == IN else c.total_out %}
+          <td class="{{ 'is-today' if c.start <= g.today <= c.end }}">{{ amt(v) if v else '' }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+
+    <tr class="adj"><td class="rowhead" style="text-align:left">Adjustment</td>
+      {% for c in g.columns %}
+        <td class="{{ 'has' if c.adjustments }} {{ 'is-today' if c.start <= g.today <= c.end }}"
+            {% if c.start <= g.today %}data-dialog="{{ url_for('entries.adjustments', a=c.start.isoformat(), b=[c.end, g.today]|min, next=cur) }}"
+            title="Add or see adjustments"{% else %}title="Adjustments are for today or earlier" style="cursor:default"{% endif %}>
+          {% if c.adjustments %}{% if c.adjustments|length > 1 %}<span class="muted" style="float:left;font-size:11px">×{{ c.adjustments|length }}</span>{% endif %}{{ '+' if c.adjustment > 0 }}{{ amt(c.adjustment) }}{% endif %}
+        </td>
+      {% endfor %}
+    </tr>
+    <tr class="bal closing"><td class="rowhead">Closing balance</td>
+      {% for c in g.columns %}<td class="{{ 'neg' if c.closing < 0 }} {{ 'is-today' if c.start <= g.today <= c.end }}">{{ amt(c.closing) }}</td>{% endfor %}
+    </tr>
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<div class="legend">
+  <span><i style="background:var(--ok)"></i>Settled</span>
+  <span><i style="background:var(--warn)"></i>Due soon</span>
+  <span><i style="background:var(--bad)"></i>Overdue</span>
+  <span><i style="background:var(--plan)"></i>Planned</span>
+  <span><span class="struck">₹0</span> Cancelled (shown, not counted)</span>
+  <span>×3 = items in the cell · red corner = something overdue · <span class="notcounted">italic</span> = shown, not counted until ticked or rescheduled</span>
+  <span>Up to today the grid shows real money (ticked items only); from tomorrow it shows the plan.</span>
+</div>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "partials/_m.html" import pill, dm, csrf, nextf, entry_actions %}
+{% set is_in = direction == 'IN' %}
+{% set noun = 'revenue' if is_in else 'expense' %}
+{% block title %}{{ 'Revenue' if is_in else 'Expense' }}{% endblock %}
+{% block content %}
+{% set cur = request.full_path %}
+{% macro row(e, level) %}
+  {% set s = status(e) %}
+  {% set open_leaves = e.leaves()|selectattr('is_settled', 'false')|rejectattr('is_cancelled')|list %}
+  {% set outside = e.is_leaf and level > 0 and not leaf_in(e) %}
+  <tr class="{{ 'parent' if not e.is_leaf }} {{ 'outside' if outside }}" {% if outside %}title="Outside the selected period or filter"{% endif %}>
+    <td style="width:26px">{% if e.is_leaf and s not in ('SETTLED','CANCELLED') %}<input type="checkbox" class="pick" value="{{ e.id }}" aria-label="Select">{% endif %}</td>
+    <td class="t" style="padding-left:{{ 10 + level * 18 }}px">
+      <span class="{{ 'struck' if e.is_cancelled }}">{{ e.title }}</span>
+      {% if e.template_id and not e.parent_id %}<span class="muted">(recurring)</span>{% endif %}
+      {% if e.reschedule_count %}<span class="badge-move" title="Moved {{ e.reschedule_count }} time(s)">↻{{ e.reschedule_count }}</span>{% endif %}
+      {% if e.reference_no and level == 0 %}<span class="muted" style="font-size:12px"> · {{ e.reference_no }}</span>{% endif %}
+    </td>
+    <td class="num {{ 'struck' if e.is_cancelled }}">{{ e.amount|inr }}</td>
+    <td style="white-space:nowrap">
+      {% if e.is_leaf %}{{ dm(e.planned_date) }}{% else %}{% set r = e.date_range() %}{{ dm(r[0]) }}{% if r[1] and r[1] != r[0] %} – {{ dm(r[1]) }}{% endif %}{% endif %}
+    </td>
+    <td>{{ pill(e) }}{% if slip_note(e) %}<div class="muted" style="font-size:11.5px">{{ slip_note(e) }}</div>{% endif %}</td>
+    <td class="rem" title="{{ e.remarks or '' }}">{{ e.remarks or '' }}</td>
+    <td class="acts">{{ entry_actions(e, cur) }}</td>
+  </tr>
+  {% for c in e.children %}{{ row(c, level + 1) }}{% endfor %}
+{% endmacro %}
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+  <h1 style="margin:0">{{ 'Revenue' if is_in else 'Expense' }}</h1>
+  <div style="display:flex;gap:8px">
+    <a class="btn" href="#" data-dialog="{{ url_for('heads.new_head_form', next=cur) }}">+ Add head</a>
+    <a class="btn primary" href="#" data-dialog="{{ url_for('entries.new_form', direction=direction, next=cur) }}">+ New {{ noun }}</a>
+  </div>
+</div>
+
+<div class="summary">
+  <div class="panel"><span class="muted">Pending this month</span><b>₹{{ summary.pending|inr }}</b></div>
+  <div class="panel"><span class="muted">Overdue</span><b style="{{ 'color:var(--bad)' if summary.overdue }}">₹{{ summary.overdue|inr }}</b></div>
+  <div class="panel"><span class="muted">{{ 'Received' if is_in else 'Paid' }} this month</span><b>₹{{ summary.settled|inr }}</b></div>
+</div>
+
+<form class="filters" method="get">
+  <div class="chips">
+    {% for f, l in [('all','All'),('pending','Pending'),('overdue','Overdue'),('settled','Received' if is_in else 'Settled'),('cancelled','Cancelled')] %}
+      <a href="{{ url_for(request.endpoint, status=f, start=a.isoformat(), end=b.isoformat(), q=q, head=head_id or '') }}" class="{{ 'on' if status_filter == f }}">{{ l }}</a>
+    {% endfor %}
+  </div>
+  <input type="hidden" name="status" value="{{ status_filter }}">
+  <input type="date" name="start" value="{{ a.isoformat() }}" aria-label="From"> <span class="muted">to</span>
+  <input type="date" name="end" value="{{ b.isoformat() }}" aria-label="To">
+  <select name="head" aria-label="Head"><option value="">All heads</option>
+    {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if head_id|string == h.id|string }}>{{ h.name }}</option>{% endfor %}</select>
+  <input name="q" value="{{ q }}" placeholder="Search title, remarks, PO / invoice no." style="min-width:260px">
+  <button class="small">Show</button>
+  {% if status_filter == 'overdue' %}<span class="muted">Showing every overdue item, whatever its date.</span>{% endif %}
+</form>
+
+<table class="list">
+  <thead><tr><th></th><th>Head / title</th><th class="num">Amount (₹)</th><th>Planned date</th><th>Status</th><th>Remarks</th><th></th></tr></thead>
+  <tbody>
+  {% for head, roots in groups %}
+    {% set live = roots|rejectattr('is_cancelled')|list %}
+    <tr class="group">
+      <td></td><td>{{ head.name }}</td>
+      <td class="num">{{ live|sum(attribute='amount')|inr }}</td>
+      <td colspan="3" class="muted" style="font-weight:400">{{ roots|length }} item(s)</td>
+      <td class="acts"><a href="#" data-dialog="{{ url_for('entries.new_form', direction=direction, head_id=head.id, next=cur) }}">+ Add {{ noun }}</a></td>
+    </tr>
+    {% for e in roots %}{{ row(e, 0) }}{% endfor %}
+  {% else %}
+    <tr><td colspan="7" class="muted" style="padding:18px">No {{ noun }} items for this period and filter. Use + New {{ noun }} to add one.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<div class="bulkbar">
+  <b><span class="n">0</span> selected</b>
+  <form method="post" action="{{ url_for('entries.settle_many') }}" onsubmit="return lekkaBulk(this)" style="display:flex;gap:6px;align-items:center">
+    {{ csrf() }}{{ nextf(cur) }}<input type="hidden" name="when" value="today">
+    <button class="primary small">Tick as {{ 'received' if is_in else 'paid' }} today</button>
+  </form>
+  <form method="post" action="{{ url_for('entries.reschedule_many') }}" onsubmit="return lekkaBulk(this)" style="display:flex;gap:6px;align-items:center">
+    {{ csrf() }}{{ nextf(cur) }}
+    <input type="date" name="new_date" min="{{ today().isoformat() }}" required aria-label="New date">
+    <button class="small">Reschedule to this date</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,19 @@
+{% from "partials/_m.html" import head_title, csrf, nextf, dmy %}
+<div class="pop">
+  {{ head_title('More: ' ~ t.title, 'Stop this recurring template, or delete it') }}
+  <h3 style="margin-top:4px">End the series</h3>
+  <p class="muted" style="margin-top:0">No more dates after the day you choose. Dates after it that are not ticked are cancelled with the reason "series ended". Everything before stays.</p>
+  <form method="post" action="{{ url_for('templates.action', tpl_id=t.id) }}" style="display:flex;gap:6px;align-items:end">
+    {{ csrf() }}{{ nextf(next) }}<input type="hidden" name="do" value="end">
+    <div><label>Last date</label><input type="date" name="end_date" required value="{{ today().isoformat() }}"></div>
+    <button class="small" data-confirm="End '{{ t.title }}'? Unticked dates after this day will be cancelled.">End series</button>
+  </form>
+  <h3>Delete the recurring template</h3>
+  <p class="muted" style="margin-top:0">Removes the template and its {{ untouched }} planned date(s) nobody has handled yet.
+    {% if handled %}{{ handled }} date(s) already ticked or changed by hand stay as ordinary items, so past balances don't change.{% endif %}</p>
+  <form method="post" action="{{ url_for('templates.action', tpl_id=t.id) }}">
+    {{ csrf() }}{{ nextf(next) }}<input type="hidden" name="do" value="delete">
+    <button class="small danger" data-confirm="Delete '{{ t.title }}'? Its {{ untouched }} planned date(s) will be removed. This cannot be undone.">Delete recurring template</button>
+  </form>
+  <footer><button type="button" data-close>Close</button></footer>
+</div>

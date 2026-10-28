@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<div class="login">
+  <div class="panel">
+    <h1 style="color:#000;font-weight:800">Lek<span style="color:var(--accent)">k</span>a</h1>
+    <p class="muted" style="margin-top:-6px">Cashflow planner</p>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Username</label><input name="username" class="full" autofocus autocomplete="username">
+      <label>Password</label><input name="password" type="password" class="full" autocomplete="current-password">
+      <label class="check" style="margin-top:10px"><input type="checkbox" name="remember" value="1"> Keep me logged in</label>
+      <footer style="margin-top:14px"><button class="primary full">Log in</button></footer>
+    </form>
+  </div>
+</div>
+{% endblock %}

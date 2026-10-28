@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "partials/_m.html" import pill, dm, dmy, csrf, nextf %}
+{% block title %}End-of-day review{% endblock %}
+{% block content %}
+{% set cur = request.full_path %}
+<h1>End-of-day review</h1>
+<p class="muted" style="margin-top:-6px">Optional. Items that are not ticked are not counted anywhere until they are ticked or given a new date.
+  For each one: tick it if the money moved, reschedule it if a new date is agreed, or leave it as it is.</p>
+
+<h2>Overdue ({{ overdue|length }})</h2>
+{% macro table(items) %}
+<table class="list">
+  <thead><tr><th></th><th>Head</th><th>Title</th><th class="num">Amount (₹)</th><th>Planned</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for e in items %}
+    <tr>
+      <td style="width:26px"><input type="checkbox" class="pick" value="{{ e.id }}" aria-label="Select"></td>
+      <td>{{ e.head.name }}</td>
+      <td>{{ e.path_titles()|join(' › ') }} <span class="muted">{{ '· In' if e.direction == 'IN' else '· Out' }}</span>
+        {% if e.reschedule_count %}<span class="badge-move">↻{{ e.reschedule_count }}</span>{% endif %}</td>
+      <td class="num">{{ e.amount|inr }}</td>
+      <td>{{ dm(e.planned_date) }}</td>
+      <td>{{ pill(e) }}</td>
+      <td class="acts">
+        {% if e.planned_date < opening_date %}
+        <span class="muted" style="font-size:12.5px;margin-right:6px" title="Lekka only counts money from the account's opening date">Before the opening date ({{ dm(opening_date) }}): not counted. Reschedule it, or move the opening date earlier on the Account page.</span>
+        {% else %}
+        <a href="#" class="btn small" data-dialog="{{ url_for('entries.settle', entry_id=e.id, next=cur) }}">Tick</a>
+        {% endif %}
+        <a href="#" class="btn small" data-dialog="{{ url_for('entries.reschedule', entry_id=e.id, next=cur) }}">Reschedule</a>
+        <span class="muted" style="margin-left:6px">or leave</span>
+      </td>
+    </tr>
+  {% else %}<tr><td colspan="7" class="muted" style="padding:14px">Nothing here.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+{{ table(overdue) }}
+<h2>Due today, not ticked yet ({{ due_today|length }})</h2>
+{{ table(due_today) }}
+
+<div class="bulkbar">
+  <b><span class="n">0</span> selected</b>
+  <form method="post" action="{{ url_for('entries.settle_many') }}" onsubmit="return lekkaBulk(this)">
+    {{ csrf() }}{{ nextf(cur) }}<input type="hidden" name="when" value="today"><button class="primary small">Tick today</button>
+  </form>
+  <form method="post" action="{{ url_for('entries.reschedule_many') }}" onsubmit="return lekkaBulk(this)" style="display:flex;gap:6px">
+    {{ csrf() }}{{ nextf(cur) }}<input type="date" name="new_date" min="{{ today().isoformat() }}" required aria-label="New date">
+    <button class="small">Reschedule all to this date</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "partials/_m.html" import csrf, nextf %}
+{% block title %}Master data{% endblock %}
+{% block content %}
+{% set cur = request.full_path %}
+<h1>Master data</h1>
+{% if show_cc %}
+<div class="chips" style="margin-bottom:12px">
+  <a href="{{ url_for('heads.index', tab='heads') }}" class="{{ 'on' if tab == 'heads' }}">Heads</a>
+  <a href="{{ url_for('heads.index', tab='cost_centres') }}" class="{{ 'on' if tab == 'cost_centres' }}">Cost centres</a>
+  <a href="{{ url_for('heads.index', tab='counterparties') }}" class="{{ 'on' if tab == 'counterparties' }}">Counterparties</a>
+</div>
+{% endif %}
+
+{% if tab == 'heads' %}
+  <p class="muted" style="margin-top:0">Heads are the categories in the grid and on the Expense and Revenue pages. One head can hold both inflow and outflow items. Order sets the order of rows in the grid; heads in use are deactivated, never deleted.</p>
+  <form method="post" action="{{ url_for('heads.add', kind='heads') }}" style="display:flex;gap:6px;margin-bottom:10px">
+    {{ csrf() }}{{ nextf(cur) }}<input name="name" placeholder="New head, e.g. Packing material" style="min-width:300px" required><button class="primary">+ Add head</button>
+  </form>
+  <table class="list">
+    <thead><tr><th style="width:90px">Order</th><th>Head</th><th>Used for</th><th class="num">Items</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for h in heads %}
+      <tr>
+        <td colspan="2">
+          <form method="post" action="{{ url_for('heads.update', kind='heads', obj_id=h.id) }}" style="display:flex;gap:6px;align-items:center">
+            {{ csrf() }}{{ nextf(cur) }}
+            <input name="sort_order" value="{{ h.sort_order }}" style="width:64px" aria-label="Order">
+            <input name="name" value="{{ h.name }}" style="flex:1;max-width:360px" class="{{ 'struck' if not h.is_active }}" aria-label="Name">
+            <button class="small">Save</button>
+          </form>
+        </td>
+        {% set dirs = used_for.get(h.id, []) %}
+        <td>{{ 'Both' if dirs|length == 2 else ('Inflow' if 'IN' in dirs else ('Outflow' if 'OUT' in dirs else '—')) }}</td>
+        <td class="num">{{ usage.get(h.id, 0) }}</td>
+        <td>{{ 'Active' if h.is_active else 'Inactive' }}</td>
+        <td class="acts">
+          <form method="post" action="{{ url_for('heads.update', kind='heads', obj_id=h.id) }}" style="display:inline">
+            {{ csrf() }}{{ nextf(cur) }}<input type="hidden" name="toggle" value="1">
+            <button class="small">{{ 'Deactivate' if h.is_active else 'Activate' }}</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="6" class="muted" style="padding:14px">No heads yet. Add the first one above.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  {% set kind = tab %}
+  {% set rows = cost_centres if tab == 'cost_centres' else counterparties %}
+  <form method="post" action="{{ url_for('heads.add', kind=kind) }}" style="display:flex;gap:6px;margin-bottom:10px">
+    {{ csrf() }}{{ nextf(cur) }}<input name="name" placeholder="Name" required style="min-width:260px">
+    {% if tab == 'counterparties' %}
+      <select name="kind_of"><option value="customer">Customer</option><option value="vendor">Vendor</option><option value="other">Other</option></select>
+      <input name="gstin" placeholder="GSTIN (optional)">
+    {% endif %}
+    <button class="primary">Add</button>
+  </form>
+  <table class="list">
+    <thead><tr><th>Name</th>{% if tab == 'counterparties' %}<th>Type</th><th>GSTIN</th>{% endif %}<th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td colspan="{{ 3 if tab == 'counterparties' else 1 }}">
+          <form method="post" action="{{ url_for('heads.update', kind=kind, obj_id=r.id) }}" style="display:flex;gap:6px">
+            {{ csrf() }}{{ nextf(cur) }}<input name="name" value="{{ r.name }}" style="min-width:240px" aria-label="Name">
+            {% if tab == 'counterparties' %}
+              <select name="kind_of">{% for k in ['customer','vendor','other'] %}<option value="{{ k }}" {{ 'selected' if r.kind == k }}>{{ k|title }}</option>{% endfor %}</select>
+              <input name="gstin" value="{{ r.gstin or '' }}" placeholder="GSTIN">
+            {% endif %}
+            <button class="small">Save</button>
+          </form>
+        </td>
+        <td>{{ 'Active' if r.is_active else 'Inactive' }}</td>
+        <td class="acts"><form method="post" action="{{ url_for('heads.update', kind=kind, obj_id=r.id) }}" style="display:inline">
+          {{ csrf() }}{{ nextf(cur) }}<input type="hidden" name="toggle" value="1"><button class="small">{{ 'Deactivate' if r.is_active else 'Activate' }}</button></form></td>
+      </tr>
+    {% else %}<tr><td colspan="5" class="muted" style="padding:14px">None yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+{% endblock %}

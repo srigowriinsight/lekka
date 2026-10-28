@@ -1,0 +1,31 @@
+{% from "partials/_m.html" import head_title, pill, entry_actions, dm, dmy %}
+{% set nxt = request.args.get('next') or url_for('grid.index') %}
+<div class="pop">
+  {{ head_title(head.name ~ (' · Inflow' if direction == 'IN' else ' · Outflow'),
+                dmy(a) if a == b else (dm(a) ~ ' – ' ~ dmy(b))) }}
+  {% if not items %}<p class="muted">Nothing here.</p>{% endif %}
+  <ul class="items">
+    {% for e in items %}
+      <li>
+        <div class="top">
+          <div><b class="{{ 'struck' if e.is_cancelled }}">{{ e.path_titles()|join(' › ') }}</b></div>
+          <div class="num"><b>₹{{ e.amount|inr }}</b></div>
+        </div>
+        <div class="meta">
+          {{ pill(e) }}
+          · planned {{ dm(e.planned_date) }}
+          {% if e.reschedule_count %}<span class="badge-move" title="Moved {{ e.reschedule_count }} time(s); first planned {{ dmy(e.original_planned_date) }}">↻{{ e.reschedule_count }}</span>{% endif %}
+          {% if slip_note(e) %} · {{ slip_note(e) }}{% endif %}
+          {% if not e.is_settled and not e.is_cancelled and e.planned_date <= today() %} · <i>not counted until ticked or rescheduled</i>{% endif %}
+          {% if e.remarks %}<br>{{ e.remarks }}{% endif %}
+          {% if e.is_cancelled %}<br>Cancelled: {{ e.cancel_reason }}{% endif %}
+        </div>
+        <div class="acts">{{ entry_actions(e, nxt) }}</div>
+      </li>
+    {% endfor %}
+  </ul>
+  <footer>
+    <a class="btn" href="#" data-dialog="{{ url_for('entries.new_form', direction=direction, head_id=head.id, date=(today() if a <= today() <= b else a).isoformat(), next=nxt) }}">+ Add under {{ head.name }}</a>
+    <button type="button" data-close>Close</button>
+  </footer>
+</div>

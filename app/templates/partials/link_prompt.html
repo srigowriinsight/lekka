@@ -1,0 +1,43 @@
+{% from "partials/_m.html" import head_title, csrf, nextf, dmy, dm %}
+{% set word = 'receipt' if form.get('direction') == 'IN' else 'payment' %}
+<div class="pop">
+  {{ head_title('Is this a planned ' ~ word ~ '?', 'You entered: ₹' ~ (amount|inr) ~ ' · ' ~ form.get('title') ~ ' · ' ~ dmy(on_date)) }}
+  <form method="post" action="{{ url_for('entries.create') }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}
+    {% for k in ['direction','title','amount','planned_date','already_settled','remarks','cost_centre_id','counterparty_id','reference_no'] %}
+      <input type="hidden" name="{{ k }}" value="{{ form.get(k, '') }}">
+    {% endfor %}
+    <input type="hidden" name="head_id" value="{{ head_id }}">
+    <div class="form-error"></div>
+    <p class="muted" style="margin:4px 0">Open plans under this head. Linking ticks the plan with {{ dmy(on_date) }}, so the money is not entered twice.</p>
+    <div class="choices">
+      {% for c in cands[:8] %}
+        <label>
+          <input type="radio" name="link_choice" value="{{ c.id }}" {{ 'checked' if loop.first }}>
+          <span style="flex:1"><b>{{ c.path_titles()|join(' › ') }}</b> · ₹{{ c.amount|inr }} · planned {{ dm(c.planned_date) }}
+            {% if show_cc and c.counterparty %} · {{ c.counterparty.name }}{% endif %}</span>
+          {% if loop.first %}<span class="pill s-PLANNED">Best match</span>
+          {% elif c.planned_date > on_date %}<span class="muted">Early</span>{% endif %}
+        </label>
+      {% endfor %}
+      <label><input type="radio" name="link_choice" value="none"> None of these: save as a new item</label>
+    </div>
+    {% set more = cands|selectattr('amount', 'lt', amount)|list %}
+    {% if more %}
+      <div data-show-when="link_choice={{ more|map(attribute='id')|join('|') }}">
+        <label>More than planned arrived. What should Lekka do?</label>
+        <div class="choices">
+          <label><input type="radio" name="extra_mode" value="extra"> Tick the plan and record the extra as a new item</label>
+          <label><input type="radio" name="extra_mode" value="raise"> Raise the plan to ₹{{ amount|inr }} and tick it</label>
+        </div>
+      </div>
+    {% endif %}
+    {% if cands|selectattr('amount', 'gt', amount)|list %}
+      <p class="muted" style="font-size:12.5px">If less than planned arrived, the plan is split: the amount received is ticked and the rest stays pending on its planned date.</p>
+    {% endif %}
+    <footer>
+      <button type="button" data-close>Back</button>
+      <button type="submit" class="primary">Link and tick</button>
+    </footer>
+  </form>
+</div>

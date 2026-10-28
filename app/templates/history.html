@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center">
+  <h1>History</h1>
+  <a href="#" class="btn small danger" data-dialog="{{ url_for('accounts.reset_period') }}">Reset a period…</a>
+</div>
+<p class="muted" style="margin-top:-6px">Every change, newest first, in Indian time. Dates a recurring template plans are shown as one line.</p>
+<form method="get" class="toolbar" style="margin-bottom:10px">
+  <label class="check" style="margin:0">From <input type="date" name="from" value="{{ f.get('from', '') }}"></label>
+  <label class="check" style="margin:0">to <input type="date" name="to" value="{{ f.get('to', '') }}"></label>
+  <select name="kind" aria-label="On">
+    {% for v, l in kinds %}<option value="{{ v }}" {{ 'selected' if f.get('kind', '') == v }}>{{ l }}</option>{% endfor %}
+  </select>
+  <select name="what" aria-label="What happened">
+    {% for v, l in whats %}<option value="{{ v }}" {{ 'selected' if f.get('what', '') == v }}>{{ l }}</option>{% endfor %}
+  </select>
+  <input name="q" value="{{ f.get('q', '') }}" placeholder="Search name or details" style="min-width:220px">
+  <button class="small primary">Show</button>
+  {% if f %}<a class="btn small" href="{{ url_for('accounts.history') }}">Clear filters</a>
+  <span class="muted">{{ rows|length }} line{{ '' if rows|length == 1 else 's' }}</span>{% endif %}
+</form>
+<table class="list">
+  <thead><tr><th>When</th><th>What happened</th><th>On</th><th>Details</th><th>Who</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td style="white-space:nowrap">{{ when(r.at) }}</td>
+      <td>{{ r.what }}</td>
+      <td><span class="muted">{{ r.kind }}</span>
+        {% if r.name %}·
+          {% if r.entry_id %}<a href="#" data-dialog="{{ url_for('entries.detail', entry_id=r.entry_id) }}">{{ r.name }}</a>
+          {% else %}<b>{{ r.name }}</b>{% endif %}
+        {% endif %}</td>
+      <td class="rem" title="{{ r.remarks or '' }}" style="max-width:420px">{{ r.remarks or '' }}</td>
+      <td>{{ r.who }}</td>
+    </tr>
+  {% else %}<tr><td colspan="5" class="muted">{{ 'Nothing matches these filters.' if f else 'Nothing yet.' }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+<p>{% if page > 1 %}<a href="{{ url_for('accounts.history', page=page - 1, **f) }}">‹ Newer</a>{% endif %}
+   {% if more %}<a href="{{ url_for('accounts.history', page=page + 1, **f) }}" style="margin-left:12px">Older ›</a>{% endif %}</p>
+{% endblock %}

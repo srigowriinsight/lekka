@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "partials/_m.html" import csrf, nextf, dmy %}
+{% block title %}Account{% endblock %}
+{% block content %}
+{% set cur = request.full_path %}
+<h1>Account and balances</h1>
+<div class="row2">
+  <div class="panel">
+    <h2 style="margin-top:0">The account</h2>
+    <p class="muted" style="margin-top:-4px">Version 1 runs on a single combined account. Items before the opening date are not counted (they are already inside the opening balance).</p>
+    <form method="post" action="{{ url_for('accounts.save') }}">
+      {{ csrf() }}{{ nextf(cur) }}
+      <label>Name</label><input name="name" class="full" value="{{ acc.name }}">
+      <div class="row2">
+        <div><label>Opening balance (₹)</label><input name="opening_balance" class="full" value="{{ acc.opening_balance|inr }}"></div>
+        <div><label>Opening date</label><input type="date" name="opening_date" class="full" value="{{ acc.opening_date.isoformat() }}"></div>
+      </div>
+      <footer style="justify-content:flex-start;margin-top:10px"><button class="primary">Save</button></footer>
+    </form>
+    <p style="margin-bottom:0">Balance today, ticked items only: <b>₹{{ today_balance|inr }}</b></p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Bank balance checks</h2>
+    <p class="muted" style="margin-top:-4px">Enter what the bank statement says. A difference usually means a missed tick or a missing item; it can also be fixed with an adjustment in the grid.</p>
+    <form method="post" action="{{ url_for('accounts.add_snapshot') }}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:end">
+      {{ csrf() }}{{ nextf(cur) }}
+      <div><label>Date</label><input type="date" name="as_of" max="{{ today().isoformat() }}" value="{{ today().isoformat() }}"></div>
+      <div><label>Bank says (₹)</label><input name="balance" required></div>
+      <div style="flex:1"><label>Remarks</label><input name="remarks" class="full"></div>
+      <button class="primary">Record</button>
+    </form>
+    <table class="list" style="margin-top:10px">
+      <thead><tr><th>Date</th><th class="num">Bank says</th><th class="num">Lekka says</th><th class="num">Difference</th><th>Result</th></tr></thead>
+      <tbody>
+        {% for s, lekka in rows %}
+          {% set diff = s.balance - lekka %}
+          <tr><td>{{ dmy(s.as_of) }}</td><td class="num">{{ s.balance|inr }}</td><td class="num">{{ lekka|inr }}</td>
+            <td class="num" style="color:{{ 'var(--ok)' if diff == 0 else 'var(--bad)' }}">{{ diff|inr }}</td>
+            <td>{{ 'Matches' if diff == 0 else 'Check for a missed item' }}{% if s.remarks %}<br><span class="muted">{{ s.remarks }}</span>{% endif %}</td></tr>
+        {% else %}<tr><td colspan="5" class="muted">No checks recorded yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

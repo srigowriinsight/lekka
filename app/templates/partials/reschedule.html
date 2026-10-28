@@ -1,0 +1,17 @@
+{% from "partials/_m.html" import head_title, csrf, nextf, dmy, pill %}
+<div class="pop">
+  {{ head_title('Reschedule', e.path_titles()|join(' › ')) }}
+  <p style="margin:2px 0 8px">{{ 'Inflow' if e.direction == 'IN' else 'Outflow' }} · <b>₹{{ e.amount|inr }}</b> · {{ pill(e) }}</p>
+  <form method="post" action="{{ url_for('entries.reschedule', entry_id=e.id) }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}<input type="hidden" name="version" value="{{ e.version }}">
+    <div class="form-error"></div>
+    <label>New planned date (today or later)</label>
+    <input type="date" name="new_date" min="{{ today().isoformat() }}" required>
+    <label>Remarks (optional)</label><input name="remarks" class="full" maxlength="1000" placeholder="e.g. customer asked for more time">
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0">
+      {% if e.is_leaf %}Original date {{ dmy(e.original_planned_date or e.planned_date) }} · moved {{ e.reschedule_count }} time(s) before.
+      {% else %}All unticked parts move by the same number of days; ticked parts stay where they are.{% endif %}
+    </p>
+    <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary">Save date</button></footer>
+  </form>
+</div>

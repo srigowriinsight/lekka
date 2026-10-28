@@ -1,0 +1,44 @@
+{% from "partials/_m.html" import head_title, csrf, nextf %}
+<div class="pop">
+  {{ head_title('Edit: ' ~ e.title, e.path_titles()[:-1]|join(' › ') if e.parent_id else None) }}
+  <form method="post" action="{{ url_for('entries.edit', entry_id=e.id) }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}<input type="hidden" name="version" value="{{ e.version }}">
+    <div class="form-error"></div>
+    {% if e.parent_id %}
+      <label>Head</label><div>{{ e.head.name }} <span class="muted">(parts always use their parent's head)</span></div>
+    {% else %}
+      <label>Head</label>
+      <select name="head_id" class="full">
+        {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if h.id == e.head_id }}>{{ h.name }}</option>{% endfor %}
+      </select>
+      <details style="margin-top:4px"><summary class="muted" style="cursor:pointer;font-size:12.5px">+ New head</summary>
+        <input name="new_head" class="full" placeholder="Name of the new head" style="margin-top:4px"></details>
+      {% if not e.is_leaf %}<p class="muted" style="font-size:12.5px;margin:4px 0">Changing the head moves the whole split tree.</p>{% endif %}
+    {% endif %}
+    <label>Title</label><input name="title" class="full" maxlength="200" value="{{ e.title }}">
+    {% if e.is_leaf %}
+      <label>Amount (₹)</label>
+      <input name="amount" class="full" value="{{ e.amount|inr }}">
+      {% if e.is_settled %}<p class="muted" style="font-size:12.5px;margin:4px 0">Already {{ 'received' if e.direction == 'IN' else 'paid' }} on {{ e.settled_on.day }} {{ e.settled_on.strftime('%b %Y') }}. Changing the amount keeps it ticked on that date and corrects every balance from then.</p>{% endif %}
+      <p class="muted" style="font-size:12.5px;margin:4px 0">To change the date, use Reschedule.</p>
+    {% else %}
+      <p class="muted">Total ₹{{ e.amount|inr }} comes from its parts; use Split to change them.</p>
+    {% endif %}
+    <label>Remarks</label><textarea name="remarks" maxlength="1000">{{ e.remarks or '' }}</textarea>
+    <div class="{{ 'row3' if show_cc else '' }}">
+      {% if show_cc %}
+      <div><label>Counterparty</label>
+        <select name="counterparty_id" class="full"><option value="">—</option>
+          {% for c in counterparties %}<option value="{{ c.id }}" {{ 'selected' if c.id == e.counterparty_id }}>{{ c.name }}</option>{% endfor %}</select></div>
+      <div><label>Cost centre</label>
+        <select name="cost_centre_id" class="full"><option value="">—</option>
+          {% for c in cost_centres %}<option value="{{ c.id }}" {{ 'selected' if c.id == e.cost_centre_id }}>{{ c.name }}</option>{% endfor %}</select></div>
+      {% endif %}
+      <div><label>PO / invoice no.</label><input name="reference_no" class="full" value="{{ e.reference_no or '' }}"></div>
+    </div>
+    {% if e.template_id and not e.parent_id %}
+      <p class="muted" style="font-size:12.5px">This date comes from the recurring template '{{ e.template.title }}'. Saving here changes only this date; to change later dates, edit the template.</p>
+    {% endif %}
+    <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary">Save</button></footer>
+  </form>
+</div>

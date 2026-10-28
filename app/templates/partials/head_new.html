@@ -1,0 +1,10 @@
+{% from "partials/_m.html" import head_title, csrf, nextf %}
+<div class="pop">
+  {{ head_title('Add head', 'Heads live in Master data; one head works for both inflow and outflow') }}
+  <form method="post" action="{{ url_for('heads.add', kind='heads') }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}
+    <div class="form-error"></div>
+    <label>Name</label><input name="name" class="full" required placeholder="e.g. Packing material">
+    <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary">Add head</button></footer>
+  </form>
+</div>

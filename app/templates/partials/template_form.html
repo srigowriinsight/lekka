@@ -1,0 +1,83 @@
+{% from "partials/_m.html" import head_title, csrf, nextf, dmy, dm %}
+{% set t = tpl %}
+<div class="pop">
+  {{ head_title('Edit recurring template: ' ~ t.title if t else 'New recurring template', 'For money that repeats, like salaries, rent or AMC. Lekka creates each date for you.') }}
+  <form method="post" action="{{ url_for('templates.edit', tpl_id=t.id) if t else url_for('templates.new') }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}
+    <div class="form-error"></div>
+    <h3 style="margin-top:4px">Required</h3>
+    <div class="row2">
+      <div><label>Title</label><input name="title" class="full" value="{{ t.title if t else '' }}" placeholder="e.g. Factory rent"></div>
+      <div><label>Head</label>
+        <select name="head_id" class="full"><option value="">Choose a head…</option>
+          {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if t and t.head_id == h.id }}>{{ h.name }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="row2">
+      <div><label>Inflow or outflow</label>
+        <select name="direction" class="full">
+          <option value="OUT" {{ 'selected' if not t or t.direction == 'OUT' }}>Outflow (expense)</option>
+          <option value="IN" {{ 'selected' if t and t.direction == 'IN' }}>Inflow (revenue)</option></select></div>
+      <div><label>Amount each time (₹)</label><input name="amount" class="full" value="{{ t.amount|inr if t else '' }}" placeholder="1,50,000"></div>
+    </div>
+    <div class="row2">
+      <div><label>How often</label>
+        <select name="freq" class="full">
+          {% for f, l in [('MONTHLY','Monthly'),('WEEKLY','Weekly'),('QUARTERLY','Quarterly (every 3 months)'),('YEARLY','Yearly'),('DAILY','Daily')] %}
+            <option value="{{ f }}" {{ 'selected' if (t and t.freq == f) or (not t and f == 'MONTHLY') }}>{{ l }}</option>{% endfor %}</select></div>
+      <div><label>Repeat every</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input name="interval_n" type="number" min="1" value="{{ t.interval_n if t else 1 }}" style="width:70px">
+          <span data-show-when="freq=MONTHLY">month(s)</span><span data-show-when="freq=WEEKLY">week(s)</span>
+          <span data-show-when="freq=QUARTERLY">quarter(s)</span><span data-show-when="freq=YEARLY">year(s)</span>
+          <span data-show-when="freq=DAILY">day(s)</span>
+        </div>
+        <span class="muted" style="font-size:12.5px">Usually 1. Put 2 to skip every other one, e.g. every 2 months.</span></div>
+    </div>
+    <div class="row2">
+      <div><label>First date</label><input type="date" name="start_date" class="full" value="{{ t.start_date.isoformat() if t else today().isoformat() }}">
+        <span class="muted" style="font-size:12.5px">The first time this money is due. Lekka creates the later dates from here.</span></div>
+    <div data-show-when="freq=MONTHLY|QUARTERLY|YEARLY">
+      <label>Day of the month</label>
+      <select name="anchor_day">
+        <option value="">Same day as the first date</option>
+        {% for d in range(1, 32) %}<option value="{{ d }}" {{ 'selected' if t and t.anchor_day == d }}>{{ d }}</option>{% endfor %}
+        <option value="-1" {{ 'selected' if t and t.anchor_day == -1 }}>Last day of the month</option>
+      </select>
+      <span class="muted" style="font-size:12.5px;display:block">A day the month does not have (30th in February) falls on its last day.</span>
+    </div>
+    <div data-show-when="freq=WEEKLY">
+      <label>Day of the week</label>
+      <select name="weekday">
+        {% for i, d in [(0,'Monday'),(1,'Tuesday'),(2,'Wednesday'),(3,'Thursday'),(4,'Friday'),(5,'Saturday'),(6,'Sunday')] %}
+          <option value="{{ i }}" {{ 'selected' if t and t.freq == 'WEEKLY' and t.anchor_day == i }}>{{ d }}</option>{% endfor %}
+      </select>
+    </div>
+    </div>
+    <h3>Optional</h3>
+    <div class="row3">
+      <div><label>Last date</label><input type="date" name="end_date" class="full" value="{{ t.end_date.isoformat() if t and t.end_date else '' }}"></div>
+      <div><label>Or stop after this many times</label><input type="number" min="1" name="max_occurrences" class="full" value="{{ t.max_occurrences if t and t.max_occurrences else '' }}"></div>
+      <div><label>Create dates up to (blank = 12 months ahead)</label><input type="date" name="horizon_until" class="full" value="{{ t.horizon_until.isoformat() if t and t.horizon_until else '' }}"></div>
+    </div>
+    <details {{ 'open' if t and t.split_pattern }}><summary class="muted" style="cursor:pointer;font-size:12.5px;margin-top:8px">Split pattern (each date is created already split)</summary>
+      {% set pat = (t.split_pattern if t and t.split_pattern else [{'pct': '', 'offset_months': 0}, {'pct': '', 'offset_months': 0}]) %}
+      {% for p in pat %}
+        <div class="row2"><div><label>Part {{ loop.index }} %</label><input name="pattern_pct" value="{{ p.pct }}"></div>
+          <div><label>Months after the date</label><input name="pattern_offset" type="number" min="0" value="{{ p.offset_months }}"></div></div>
+      {% endfor %}
+      <p class="muted" style="font-size:12.5px">Leave the % boxes empty for no split. Example: 50% now and 50% six months later.</p>
+    </details>
+    <label>Remarks (optional)</label><input name="remarks" class="full" value="{{ t.remarks or '' if t else '' }}">
+    {% if t %}
+      {% if upcoming %}<p class="muted" style="font-size:12.5px">Next: {% for r in upcoming %}{{ dm(r.occurrence_date) }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+      <h3>Which dates should change?</h3>
+      <div class="choices">
+        <label><input type="radio" name="scope" value="future"> From a date onwards (the old rule ends the day before)</label>
+        <label><input type="radio" name="scope" value="series"> Whole series (every future date not handled by hand)</label>
+      </div>
+      <div data-show-when="scope=future"><label>Change starts on</label><input type="date" name="from_date" value="{{ today().isoformat() }}"></div>
+      <p class="muted" style="font-size:12.5px">To change only one date, edit that item instead. Ticked, edited, split or rescheduled dates are never changed.</p>
+    {% endif %}
+    <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary">{{ 'Save changes' if t else 'Save recurring template' }}</button></footer>
+  </form>
+</div>

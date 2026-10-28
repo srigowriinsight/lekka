@@ -1,0 +1,40 @@
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}
+{% macro nextf(n) %}<input type="hidden" name="next" value="{{ n }}">{% endmacro %}
+{% macro pill(e) %}<span class="pill s-{{ status(e) }}">{{ status_label(e) }}</span>{% endmacro %}
+{% macro dmy(d) %}{% if d %}{{ d.day }} {{ d.strftime('%b %Y') }}{% endif %}{% endmacro %}
+{% macro dm(d) %}{% if d %}{{ d.day }} {{ d.strftime('%b') }}{% endif %}{% endmacro %}
+{% macro head_title(title, sub=None) %}
+<header><div><h2>{{ title }}</h2>{% if sub %}<div class="crumb">{{ sub }}</div>{% endif %}</div>
+<button type="button" class="close" data-close aria-label="Close">×</button></header>
+{% endmacro %}
+{% macro entry_actions(e, nxt, small=True, details=True) %}
+  {% set s = status(e) %}
+  {% if s != 'DELETED' %}
+  {% if e.is_leaf and s not in ('SETTLED', 'CANCELLED') %}
+    <a href="#" class="btn {{ 'small' if small }}" data-dialog="{{ url_for('entries.settle', entry_id=e.id, next=nxt) }}">Tick</a>
+    <a href="#" class="btn {{ 'small' if small }}" data-dialog="{{ url_for('entries.reschedule', entry_id=e.id, next=nxt) }}">Reschedule</a>
+  {% endif %}
+  {% if s not in ('SETTLED', 'CANCELLED') or not e.is_leaf %}
+    {% if not e.is_cancelled %}<a href="#" class="btn {{ 'small' if small }}" data-dialog="{{ url_for('entries.split_form', entry_id=e.id, next=nxt) }}">Split</a>{% endif %}
+  {% endif %}
+  {% if s not in ('SETTLED', 'CANCELLED') %}
+    <a href="#" class="btn {{ 'small' if small }} danger" data-dialog="{{ url_for('entries.cancel', entry_id=e.id, next=nxt) }}">Cancel</a>
+  {% endif %}
+  {% if e.is_leaf and e.is_settled %}
+    <form method="post" action="{{ url_for('entries.unsettle', entry_id=e.id) }}" style="display:inline">
+      {{ csrf() }}{{ nextf(nxt) }}<input type="hidden" name="version" value="{{ e.version }}">
+      <button class="{{ 'small' if small }}" data-confirm="Untick '{{ e.title }}'? The balance from its settled date will change.">Untick</button>
+    </form>
+  {% endif %}
+  {# A split part is deleted together with its whole item, so the button says so and names the item. #}
+  {% set top = e.ancestors()[-1] if e.parent_id else e %}
+  {% set ticked = top.leaves()|selectattr('is_settled')|list %}
+  <form method="post" action="{{ url_for('entries.delete', entry_id=top.id) }}" style="display:inline">
+    {{ csrf() }}{{ nextf(nxt) }}<input type="hidden" name="version" value="{{ top.version }}">
+    <button class="{{ 'small' if small }} danger-quiet"
+            title="{{ 'Deletes ' ~ top.title ~ ' with all its parts' if e.parent_id else 'Remove an item entered by mistake. It disappears everywhere.' }}"
+            data-confirm="Delete '{{ top.title }}'{{ ' and all its parts' if not top.is_leaf }}? It will disappear from the grid, the lists and every balance.{% if ticked %} It has money ticked as {{ 'received' if top.direction == 'IN' else 'paid' }}, so past balances will change.{% endif %} To keep it visible but not counted, use Cancel instead.">{{ 'Delete whole item' if e.parent_id else 'Delete' }}</button>
+  </form>
+  {% if details %}<a href="#" class="btn {{ 'small' if small }}" data-dialog="{{ url_for('entries.detail', entry_id=e.id, next=nxt) }}">Details</a>{% endif %}
+  {% endif %}
+{% endmacro %}

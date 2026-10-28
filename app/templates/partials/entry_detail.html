@@ -1,0 +1,55 @@
+{% from "partials/_m.html" import head_title, pill, entry_actions, dm, dmy, csrf, nextf %}
+{% macro node(n) %}
+  <li>
+    <span class="{{ 'struck' if n.is_cancelled }}">{% if n.id == e.id %}<b>{{ n.title }}</b>{% else %}<a href="#" data-dialog="{{ url_for('entries.detail', entry_id=n.id, next=next) }}">{{ n.title }}</a>{% endif %}</span>
+    · ₹{{ n.amount|inr }} · {{ pill(n) }}
+    {% if n.is_leaf and n.planned_date %}<span class="muted">· planned {{ dm(n.planned_date) }}</span>{% endif %}
+    {% if n.children %}<ul>{% for c in n.children %}{{ node(c) }}{% endfor %}</ul>{% endif %}
+  </li>
+{% endmacro %}
+<div class="pop">
+  {{ head_title(e.title, e.path_titles()[:-1]|join(' › ') if e.parent_id else e.head.name) }}
+  <div class="kv" style="margin:8px 0 12px">
+    <div>Amount</div><div><b>₹{{ e.amount|inr }}</b> · {{ 'Inflow' if e.direction == 'IN' else 'Outflow' }}</div>
+    <div>Head</div><div>{{ e.head.name }}</div>
+    <div>Status</div><div>{{ pill(e) }}{% if slip_note(e) %} · {{ slip_note(e) }}{% endif %}</div>
+    {% if e.is_leaf %}
+      <div>Planned date</div><div>{{ dmy(e.planned_date) }}{% if e.reschedule_count %} · ↻{{ e.reschedule_count }}, first planned {{ dmy(e.original_planned_date) }}{% endif %}</div>
+    {% else %}
+      {% set r = e.date_range() %}<div>Dates</div><div>{{ dm(r[0]) }}{% if r[1] != r[0] %} – {{ dm(r[1]) }}{% endif %}</div>
+    {% endif %}
+    {% if show_cc and e.counterparty %}<div>Counterparty</div><div>{{ e.counterparty.name }}</div>{% endif %}
+    {% if show_cc and e.cost_centre %}<div>Cost centre</div><div>{{ e.cost_centre.name }}</div>{% endif %}
+    {% if e.reference_no %}<div>Reference</div><div>{{ e.reference_no }}</div>{% endif %}
+    {% if e.template %}<div>Recurring</div><div>{{ e.template.title }}{% if e.is_overridden %} · edited by hand{% endif %}</div>{% endif %}
+    {% if e.is_cancelled %}<div>Cancelled</div><div>{{ e.cancel_reason }}</div>{% endif %}
+    <div>Remarks</div><div>{{ e.remarks or '—' }}</div>
+  </div>
+  {% if e.is_deleted %}
+  <div class="flash error" style="margin:0 0 10px">This item was deleted. It no longer appears anywhere or counts in any balance; History below shows what happened.</div>
+  {% else %}
+  <div class="acts" style="display:flex;flex-wrap:wrap;gap:6px">
+    {{ entry_actions(e, next, small=False, details=False) }}
+    {% if not e.is_cancelled %}<a href="#" class="btn" data-dialog="{{ url_for('entries.edit', entry_id=e.id, next=next) }}">Edit</a>{% endif %}
+    {% if not e.is_leaf %}
+      <form method="post" action="{{ url_for('entries.remove_split', entry_id=e.id) }}" style="display:inline">{{ csrf() }}{{ nextf(next) }}
+        <button data-confirm="Turn this back into a single item? Its parts will be removed.">Remove split</button></form>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if root.children %}
+    <h3>Split tree</h3>
+    <ul class="tree">{{ node(root) }}</ul>
+  {% endif %}
+  <h3>History</h3>
+  <table class="hist">
+    {% for h in history %}
+      <tr><td class="muted" style="white-space:nowrap">{{ when(h.at) }}</td>
+          <td>{{ action_label(h.table_name, h.action) }}{% if h.record_id != e.id %} · <i>{{ titles.get(h.record_id, '#' ~ h.record_id) }}</i>{% endif %}
+            {% if h.remarks %}<br><span class="muted">{{ h.remarks }}</span>{% endif %}
+            {% if h.new_json and h.new_json.get('ticked_on') and h.new_json.get('settled_on') != h.new_json.get('ticked_on') %}<br><span class="muted">Ticked on {{ h.new_json.ticked_on }} · settled date {{ h.new_json.settled_on }}</span>{% endif %}</td>
+          <td class="muted">{{ h.user.name if h.user else '' }}</td></tr>
+    {% else %}<tr><td class="muted">{% if e.template_id or root.template_id %}Planned by the recurring template '{{ (root.template or e.template).title }}'. No changes since.{% else %}No history yet.{% endif %}</td></tr>{% endfor %}
+  </table>
+  <footer><button type="button" data-close>Close</button></footer>
+</div>

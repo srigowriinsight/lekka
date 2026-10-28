@@ -1,0 +1,35 @@
+{% from "partials/_m.html" import head_title, csrf, nextf, dm %}
+<div class="pop">
+  {{ head_title('Cancel: ' ~ e.title, e.path_titles()[:-1]|join(' › ') if e.parent_id else None) }}
+  <form method="post" action="{{ url_for('entries.cancel', entry_id=e.id) }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}<input type="hidden" name="version" value="{{ e.version }}">
+    <div class="form-error"></div>
+    {% if not e.is_leaf %}
+      {% set pending = e.leaves()|rejectattr('is_settled')|rejectattr('is_cancelled')|list %}
+      <p>This cancels the {{ pending|length }} unticked part(s), ₹{{ pending|sum(attribute='amount')|inr }} in all. Ticked parts stay as they are.</p>
+    {% elif e.parent_id %}
+      <p>₹{{ e.amount|inr }} is part of a split. What should happen to this money? (Nothing is chosen for you.)</p>
+      <div class="choices">
+        <label><input type="radio" name="mode" value="shrink"> Shrink the parent's total by ₹{{ e.amount|inr }}</label>
+        {% if targets %}
+          <label><input type="radio" name="mode" value="move"> Move the amount onto another unticked part</label>
+        {% else %}
+          <p class="muted" style="font-size:12.5px">There is no other unticked part to move it to.</p>
+        {% endif %}
+      </div>
+      {% if targets %}
+        <div data-show-when="mode=move">
+          <label>Move to</label>
+          <select name="target_id" class="full"><option value="">Choose a part…</option>
+            {% for t in targets %}<option value="{{ t.id }}">{{ t.path_titles()|join(' › ') }} · ₹{{ t.amount|inr }} · {{ dm(t.planned_date) }}</option>{% endfor %}
+          </select>
+        </div>
+      {% endif %}
+    {% else %}
+      <p>₹{{ e.amount|inr }} will leave every total. The item stays on record, struck through.</p>
+    {% endif %}
+    <label>Reason (required)</label>
+    <input name="reason" class="full" maxlength="255" required placeholder="e.g. event postponed">
+    <footer><button type="button" data-close>Back</button><button type="submit" class="primary" style="background:var(--bad);border-color:var(--bad);color:#fff">Cancel item</button></footer>
+  </form>
+</div>

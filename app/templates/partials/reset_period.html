@@ -1,0 +1,51 @@
+{% from "partials/_m.html" import head_title, csrf, nextf, dmy %}
+<div class="pop">
+  {{ head_title('Reset a period', 'Remove everything that was entered in a time window') }}
+  <form method="post" action="{{ url_for('accounts.reset_period') }}" class="js-form">
+    {{ csrf() }}{{ nextf(url_for('accounts.history')) }}
+    <div class="form-error"></div>
+    {% if step == 'ask' %}
+      <p class="muted" style="margin-top:0">Choose when the entries were made (Indian time). Lekka removes the expenses and revenue entered in that time,
+        recurring templates added then (with all their planned dates), and adjustments added then.
+        Items entered earlier stay, even if they were changed in that time. You see the list before anything is removed.</p>
+      <div class="row2">
+        <div><label>From</label><input type="datetime-local" name="start" class="full" value="{{ start }}"></div>
+        <div><label>To</label><input type="datetime-local" name="end" class="full" value="{{ end }}"></div>
+      </div>
+      <input type="hidden" name="step" value="preview">
+      <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary">Show what will be removed</button></footer>
+    {% else %}
+      <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+      <input type="hidden" name="step" value="run">
+      <p style="margin-top:0"><b>{{ label }}</b></p>
+      {% set n = found['items']|length + found['templates']|length + found['adjustments']|length %}
+      {% if n == 0 %}
+        <p class="muted">Nothing was entered in this period, so there is nothing to remove.</p>
+        <footer><button type="button" data-close>Close</button></footer>
+      {% else %}
+        <table class="hist" style="width:100%;margin-bottom:8px">
+          {% for e in found['items'] %}
+            <tr><td class="muted" style="white-space:nowrap">{{ when(e.created_at) }}</td>
+                <td>{{ 'Revenue' if e.direction == 'IN' else 'Expense' }} · {{ e.head.name }} · <b>{{ e.title }}</b></td>
+                <td class="num">₹{{ e.amount|inr }}</td></tr>
+          {% endfor %}
+          {% for t in found['templates'] %}
+            <tr><td class="muted" style="white-space:nowrap">{{ when(t.created_at) }}</td>
+                <td>Recurring template · <b>{{ t.title }}</b> · {{ found['tpl_dates'][t.id] }} planned date(s)</td>
+                <td class="num">₹{{ t.amount|inr }} each</td></tr>
+          {% endfor %}
+          {% for x in found['adjustments'] %}
+            <tr><td class="muted" style="white-space:nowrap">{{ when(x.created_at) }}</td>
+                <td>Adjustment on {{ dmy(x.adj_date) }}{% if x.remarks %} · {{ x.remarks }}{% endif %}</td>
+                <td class="num">{{ '+' if x.amount > 0 }}₹{{ x.amount|inr }}</td></tr>
+          {% endfor %}
+        </table>
+        <p class="muted" style="font-size:12.5px">Removed items disappear from the grid, the lists and every balance; History keeps a record.
+          This can't be undone from the app, so run <b>backup_db.bat</b> first if you might want them back.</p>
+        <label class="check"><input type="checkbox" name="sure" value="1"> Yes, remove these {{ n }} entr{{ 'y' if n == 1 else 'ies' }}</label>
+        <footer><button type="button" data-close>Cancel</button>
+          <button type="submit" class="primary" style="background:var(--bad);border-color:var(--bad)">Reset this period</button></footer>
+      {% endif %}
+    {% endif %}
+  </form>
+</div>

@@ -1,0 +1,51 @@
+{% from "partials/_m.html" import head_title, csrf, nextf %}
+<div class="pop">
+  {{ head_title('New ' ~ ('revenue' if direction == 'IN' else 'expense'), 'Inflow: money coming in' if direction == 'IN' else 'Outflow: money going out') }}
+  <form method="post" action="{{ url_for('entries.create') }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}
+    <input type="hidden" name="direction" value="{{ direction }}">
+    <div class="form-error"></div>
+    <label>Head</label>
+    <select name="head_id" class="full">
+      <option value="">Choose a head…</option>
+      {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if head_id|string == h.id|string }}>{{ h.name }}</option>{% endfor %}
+    </select>
+    <details style="margin-top:4px"><summary class="muted" style="cursor:pointer;font-size:12.5px">+ New head</summary>
+      <input name="new_head" class="full" placeholder="Name of the new head (also added to Master data)" style="margin-top:4px">
+    </details>
+    <label>Title</label>
+    <input name="title" class="full" maxlength="200" placeholder="e.g. PO-V-221 components">
+    <div class="row2">
+      <div><label>Amount (₹)</label><input name="amount" class="full" inputmode="decimal" placeholder="1,00,000"></div>
+      <div><label>Planned date</label><input type="date" name="planned_date" class="full" value="{{ date }}"
+                                             data-today="{{ today().isoformat() }}"></div>
+    </div>
+    <label class="check" style="margin-top:10px">
+      <input type="checkbox" name="already_settled" value="1" {{ 'checked' if date and date < today().isoformat() }}>
+      Already {{ 'received' if direction == 'IN' else 'paid' }} on this date (today or earlier) — Lekka will look for its plan
+    </label>
+    <label>Remarks (optional)</label>
+    <textarea name="remarks" maxlength="1000"></textarea>
+    <details><summary class="muted" style="cursor:pointer;font-size:12.5px;margin-top:8px">{{ 'More: counterparty, cost centre, reference' if show_cc else 'More: PO / invoice no.' }}</summary>
+      <div class="{{ 'row3' if show_cc else '' }}">
+        {% if show_cc %}
+        <div><label>Counterparty</label>
+          <select name="counterparty_id" class="full"><option value="">—</option>
+            {% for c in counterparties %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+        <div><label>Cost centre</label>
+          <select name="cost_centre_id" class="full"><option value="">—</option>
+            {% for c in cost_centres %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+        {% endif %}
+        <div><label>PO / invoice no.</label><input name="reference_no" class="full" maxlength="60"></div>
+      </div>
+    </details>
+    <p class="muted" style="font-size:12.5px;margin:10px 0 0">Entered by is filled in automatically.</p>
+    <footer class="split-footer">
+      {# Save comes first in the page so pressing Enter saves; the split button is shown apart, on the left. #}
+      <button type="submit" class="primary" style="order:2">Save</button>
+      <button type="button" data-close style="order:1">Cancel</button>
+      <button type="submit" name="then_split" value="1" style="order:0;margin-right:auto"
+              title="Saves the item, then opens Split so you can divide it into parts">Save, then split into parts…</button>
+    </footer>
+  </form>
+</div>

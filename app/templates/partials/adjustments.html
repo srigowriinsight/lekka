@@ -1,0 +1,38 @@
+{% from "partials/_m.html" import head_title, csrf, nextf, dmy, dm %}
+<div class="pop">
+  {{ head_title('Balance adjustments', dmy(a) if a == b else dm(a) ~ ' – ' ~ dmy(b)) }}
+  {% if items %}
+    <table class="hist" style="width:100%;margin-bottom:10px">
+      {% for adj in items %}
+        <tr>
+          <td style="white-space:nowrap">{{ dm(adj.adj_date) }}</td>
+          <td colspan="2">
+            <form method="post" action="{{ url_for('entries.adjustment_edit', adj_id=adj.id) }}" class="js-form" style="display:flex;gap:6px;align-items:center">
+              {{ csrf() }}{{ nextf(next) }}
+              <input name="amount" value="{{ adj.amount }}" style="width:110px" aria-label="Amount">
+              <input name="remarks" value="{{ adj.remarks or '' }}" placeholder="Remarks (optional)" style="flex:1" aria-label="Remarks">
+              <button class="small">Save</button>
+              <button class="small danger" name="delete" value="1" data-confirm="Remove this adjustment?">Remove</button>
+              <div class="form-error"></div>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="muted">No adjustments in this period.</p>
+  {% endif %}
+  <h3>Add an adjustment</h3>
+  <form method="post" action="{{ url_for('entries.adjustment_new') }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}
+    <div class="form-error"></div>
+    <div class="row3">
+      <div><label>Date (today or earlier)</label><input type="date" name="adj_date" class="full" value="{{ default_date.isoformat() }}" max="{{ today().isoformat() }}"></div>
+      <div><label>+ or −</label><select name="sign" class="full"><option value="-">− Reduce balance</option><option value="+">+ Increase balance</option></select></div>
+      <div><label>Amount (₹)</label><input name="amount" class="full" inputmode="decimal" placeholder="350"></div>
+    </div>
+    <label>Remarks (optional)</label><input name="remarks" class="full" maxlength="1000" placeholder="e.g. bank charges">
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0">An adjustment counts in that day's closing and moves every later balance. Use it for bank charges, interest or matching the bank.</p>
+    <footer><button type="button" data-close>Close</button><button type="submit" class="primary">Add adjustment</button></footer>
+  </form>
+</div>

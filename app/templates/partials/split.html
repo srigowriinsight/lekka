@@ -1,0 +1,65 @@
+{% from "partials/_m.html" import head_title, csrf, nextf %}
+{% set editing = not e.is_leaf %}
+<div class="pop">
+  {{ head_title(('Edit split: ' if editing else 'Split: ') ~ e.title, e.path_titles()|join(' › ')) }}
+  <p style="margin:2px 0 8px">Amount to split: <b>₹{{ e.amount|inr }}</b> · {{ 'Inflow' if e.direction == 'IN' else 'Outflow' }} · head {{ e.head.name }}</p>
+  {% if editing and e.children|selectattr('children')|list %}
+    <p class="form-error on">Some parts are split further; edit those lower levels from their own Split button.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('entries.split_form', entry_id=e.id) }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}<input type="hidden" name="version" value="{{ e.version }}">
+    <div class="form-error"></div>
+    <div class="chips" style="margin-bottom:8px">
+      <label class="check"><input type="radio" name="mode" value="amt" checked> By amount</label>
+      <label class="check" style="margin-left:10px"><input type="radio" name="mode" value="pct"> By %</label>
+    </div>
+    {% if editing %}
+      <label>New total (only if the overall amount changed)</label>
+      <input name="new_total" placeholder="{{ e.amount|inr }}" style="width:180px">
+    {% endif %}
+    <div class="parts" data-target="{{ e.amount }}">
+      <div class="part hdr"><span>Title</span><span>Amount (₹)</span><span>%</span><span>Planned date</span><span></span></div>
+      {% if editing %}
+        {% for c in e.children %}
+          {% set locked = c.is_settled or c.is_cancelled %}
+          <div class="part {{ 'locked' if locked }} {{ 'skip' if c.is_cancelled }}" title="{{ 'Ticked or cancelled: locked' if locked }}">
+            <input type="hidden" name="part_id" value="{{ c.id }}">
+            <input name="part_title" value="{{ c.title }}" {{ 'readonly' if locked }}>
+            <input class="amt" name="part_amount" value="{{ c.amount }}" {{ 'readonly' if locked }}>
+            <input class="pct" readonly tabindex="-1">
+            <input class="dt" type="date" name="part_date" value="{{ (c.settled_on if c.is_settled else c.planned_date).isoformat() if (c.settled_on or c.planned_date) else '' }}" {{ 'readonly' if locked }}>
+            <input type="hidden" name="part_remarks" value="{{ c.remarks or '' }}">
+            {% if not locked %}<button type="button" class="del linkish" title="Remove part">×</button>{% else %}<span title="Locked">🔒</span>{% endif %}
+          </div>
+        {% endfor %}
+      {% else %}
+        {% for i in range(2) %}
+          <div class="part">
+            <input type="hidden" name="part_id" value="">
+            <input name="part_title" value="{{ e.title }} – part {{ i + 1 }}">
+            <input class="amt" name="part_amount" placeholder="0">
+            <input class="pct" placeholder="%">
+            <input class="dt" type="date" name="part_date" value="{{ e.planned_date.isoformat() if e.planned_date else '' }}">
+            <input type="hidden" name="part_remarks" value="">
+            <button type="button" class="del linkish" title="Remove part">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+      <div class="part tpl" hidden>
+        <input type="hidden" name="part_id" value="" disabled>
+        <input name="part_title" value="{{ e.title }} – part" disabled>
+        <input class="amt" name="part_amount" placeholder="0" disabled>
+        <input class="pct" placeholder="%" disabled>
+        <input class="dt" type="date" name="part_date" value="{{ (e.planned_date or today()).isoformat() }}" disabled>
+        <input type="hidden" name="part_remarks" value="" disabled>
+        <button type="button" class="del linkish">×</button>
+      </div>
+    </div>
+    <button type="button" class="linkish add-part">+ Add part</button>
+    <div class="alloc"><i></i></div>
+    <div class="alloc-text muted" style="font-size:12.5px"></div>
+    <label>Remarks (optional)</label><input name="remarks" class="full" maxlength="1000">
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0">Every part keeps the head {{ e.head.name }} and needs its own planned date. The last part absorbs rounding in % mode. Parts can be split again, as deep as needed.</p>
+    <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary save-split">Save split</button></footer>
+  </form>
+</div>

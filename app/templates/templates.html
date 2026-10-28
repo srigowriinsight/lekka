@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "partials/_m.html" import csrf, nextf, dm, dmy %}
+{% block title %}Recurring templates{% endblock %}
+{% block content %}
+{% set cur = request.full_path %}
+{% set freq_names = {'DAILY': 'Daily', 'WEEKLY': 'Weekly', 'MONTHLY': 'Monthly', 'QUARTERLY': 'Quarterly', 'YEARLY': 'Yearly'} %}
+{% set weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+  <h1 style="margin:0">Recurring templates</h1>
+  <a class="btn primary" href="#" data-dialog="{{ url_for('templates.new', next=cur) }}">+ New recurring template</a>
+</div>
+<p class="muted" style="margin-top:0">For money that repeats, like salaries, rent or AMC. Each recurring template creates its dates under its head, up to 12 months ahead. Each date can then be ticked, rescheduled, split or cancelled on its own.</p>
+<table class="list">
+  <thead><tr><th>Title</th><th>Head</th><th class="num">Amount (₹)</th><th>Frequency</th><th>Next</th><th>Plans until</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for t in tpls %}
+    {% set nd = next_date(t) %}
+    <tr>
+      <td><b>{{ t.title }}</b></td>
+      <td>{{ t.head.name }}</td>
+      <td class="num" style="color:{{ 'var(--ok)' if t.direction == 'IN' else 'inherit' }}">{{ '+' if t.direction == 'IN' else '−' }}{{ t.amount|inr }}</td>
+      {% set unit = {'DAILY': 'day', 'WEEKLY': 'week', 'MONTHLY': 'month', 'QUARTERLY': 'quarter', 'YEARLY': 'year'}[t.freq] %}
+      <td>Every {% if t.interval_n > 1 %}{{ t.interval_n }} {{ unit }}s{% else %}{{ unit }}{% endif %}{% if t.freq == 'WEEKLY' %} on {{ weekdays[t.anchor_day if t.anchor_day is not none else t.start_date.weekday()] }}{% elif t.freq in ('MONTHLY','QUARTERLY','YEARLY') %} on {{ 'the last day' if t.anchor_day == -1 else ('day ' ~ (t.anchor_day or t.start_date.day)) }}{% endif %}</td>
+      <td>{{ dm(nd) if nd else '—' }}</td>
+      <td>{{ dmy(t.horizon_until) if t.horizon_until else '12 months ahead' }}{% if t.end_date %}<br><span class="muted">ends {{ dmy(t.end_date) }}</span>{% endif %}</td>
+      <td>{% if t.is_active %}<span class="pill s-SETTLED">Active</span>{% else %}<span class="pill s-CANCELLED">Paused</span>{% endif %}</td>
+      <td class="acts">
+        <a href="#" class="btn small" data-dialog="{{ url_for('templates.edit', tpl_id=t.id, next=cur) }}">Edit</a>
+        <form method="post" action="{{ url_for('templates.action', tpl_id=t.id) }}" style="display:inline">
+          {{ csrf() }}{{ nextf(cur) }}
+          {% if t.is_active %}
+            <button class="small" name="do" value="pause" data-confirm="Pause '{{ t.title }}'? Future dates nobody has handled are removed.">Pause</button>
+          {% else %}
+            <input type="hidden" name="do" value="resume">
+            <button class="small" name="create_skipped" value="1" data-confirm="Create the dates skipped while paused?">Resume, create skipped dates</button>
+            <button class="small" name="create_skipped" value="0">Resume from today</button>
+          {% endif %}
+        </form>
+        <a href="#" class="btn small" data-dialog="{{ url_for('templates.more', tpl_id=t.id, next=cur) }}">More</a>
+      </td>
+    </tr>
+  {% else %}<tr><td colspan="8" class="muted" style="padding:14px">No recurring templates yet. Add salaries, rent and other regular payments here.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}
