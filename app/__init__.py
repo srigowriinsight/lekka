@@ -11,6 +11,9 @@ def create_app(config_object=None):
     from .config import Config
     app = Flask(__name__)
     app.config.from_object(config_object or Config)
+    if app.config.get("BEHIND_PROXY"):
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -54,6 +57,29 @@ def _register_cli(app):
         db.session.add(u)
         db.session.commit()
         click.echo(f"User '{username}' created.")
+
+    @app.cli.command("ensure-user")
+    def ensure_user():
+        """Hosting without a shell (Render free plan): create or update the login from LEKKA_USER and
+        LEKKA_PASSWORD (and optional LEKKA_NAME). Does nothing when they are not set."""
+        import os
+        from .models import User
+        username, password = os.environ.get("LEKKA_USER"), os.environ.get("LEKKA_PASSWORD")
+        if not username or not password:
+            click.echo("LEKKA_USER / LEKKA_PASSWORD not set; no login changed.")
+            return
+        if len(password) < 8:
+            raise click.ClickException("LEKKA_PASSWORD must be at least 8 characters.")
+        u = User.query.filter_by(username=username).first()
+        if u is None:
+            u = User(username=username, name=os.environ.get("LEKKA_NAME") or username)
+            u.set_password(password)
+            db.session.add(u)
+            click.echo(f"User '{username}' created.")
+        elif not u.check_password(password):
+            u.set_password(password)
+            click.echo(f"Password for '{username}' updated.")
+        db.session.commit()
 
     @app.cli.command("set-password")
     @click.argument("username")

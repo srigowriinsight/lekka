@@ -12,3 +12,4 @@ python-dotenv>=1.0
 tzdata>=2024.1
 waitress>=3.0
 pytest>=8.0
+psycopg[binary]>=3.2     # Postgres (Render test hosting); not needed for MariaDB

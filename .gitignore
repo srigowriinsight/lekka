@@ -10,3 +10,4 @@ instance/
 backups/
 *.sql
 .DS_Store
+*.pem

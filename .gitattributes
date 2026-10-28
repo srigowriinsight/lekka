@@ -1,0 +1,4 @@
+# Keep Linux line endings for scripts Render runs, Windows ones for .bat files
+*.sh text eol=lf
+*.bat text eol=crlf
+*.py text eol=lf

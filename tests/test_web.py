@@ -336,7 +336,7 @@ def test_correct_amount_of_ticked_item(demo_client):
     r = demo_client.post(f"/entries/{e.id}/amount", data={"amount": str(old_amount + 1000), "version": e.version},
                          headers=F)
     assert r.get_json().get("redirect")
-    e = by_title(e.title)
+    e = db.session.get(CashflowEntry, e.id)
     assert e.is_settled and e.settled_on == paid_on and e.amount == old_amount + 1000
     sign = 1 if e.direction == "IN" else -1
     assert closing_on(paid_on) == before + sign * 1000

@@ -1,0 +1,39 @@
+# Render Blueprint for testing Lekka: one free web service + one free Postgres database, both on Render.
+# Render reads this file when you choose New > Blueprint and pick this GitHub repository.
+# (Lekka still runs on MariaDB on your own computer; it works on both. Render's free Postgres lasts 30 days.)
+services:
+  - type: web
+    name: lekka
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash render_start.sh
+    healthCheckPath: /login
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lekka-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FLASK_APP
+        value: app:create_app
+      - key: TZ
+        value: Asia/Kolkata
+      - key: LEKKA_USER            # the login for the website, e.g. finance
+        sync: false
+      - key: LEKKA_PASSWORD        # at least 8 characters
+        sync: false
+      - key: LEKKA_NAME
+        value: Finance
+
+databases:
+  - name: lekka-db
+    plan: free
+    region: singapore
+    databaseName: lekka
+    user: lekka
+    postgresMajorVersion: "16"
+    ipAllowList: []                # only Lekka on Render can reach it, not the internet

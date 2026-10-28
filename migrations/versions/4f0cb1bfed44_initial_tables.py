@@ -163,7 +163,7 @@ def upgrade():
     sa.Column('created_by', sa.Integer(), nullable=True),
     sa.Column('updated_by', sa.Integer(), nullable=True),
     sa.CheckConstraint('amount > 0', name='ck_amount_positive'),
-    sa.CheckConstraint('is_settled = 0 OR settled_on IS NOT NULL', name='ck_settled_date'),
+    sa.CheckConstraint('NOT is_settled OR settled_on IS NOT NULL', name='ck_settled_date'),
     sa.ForeignKeyConstraint(['cost_centre_id'], ['cost_centre.id'], ),
     sa.ForeignKeyConstraint(['counterparty_id'], ['counterparty.id'], ),
     sa.ForeignKeyConstraint(['created_by'], ['app_user.id'], ),

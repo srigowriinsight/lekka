@@ -146,7 +146,7 @@ class CashflowEntry(TimestampMixin, db.Model):
     __table_args__ = (
         UniqueConstraint("template_id", "occurrence_date", name="uq_occurrence"),
         CheckConstraint("amount > 0", name="ck_amount_positive"),
-        CheckConstraint("is_settled = 0 OR settled_on IS NOT NULL", name="ck_settled_date"),
+        CheckConstraint("NOT is_settled OR settled_on IS NOT NULL", name="ck_settled_date"),
         Index("ix_planned", "planned_date"),
         Index("ix_settled", "is_settled", "settled_on"),
     )
