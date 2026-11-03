@@ -1,4 +1,4 @@
-{% from "partials/_m.html" import head_title, csrf, nextf %}
+{% from "partials/_m.html" import head_title, csrf, nextf, vendor_field %}
 <div class="pop">
   {{ head_title('New ' ~ ('revenue' if direction == 'IN' else 'expense'), 'Inflow: money coming in' if direction == 'IN' else 'Outflow: money going out') }}
   <form method="post" action="{{ url_for('entries.create') }}" class="js-form">
@@ -8,30 +8,71 @@
     <label>Head</label>
     <select name="head_id" class="full">
       <option value="">Choose a head…</option>
-      {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if head_id|string == h.id|string }}>{{ h.name }}</option>{% endfor %}
+      {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if head_id|string == h.id|string }}>{{ head_label(h) }}</option>{% endfor %}
     </select>
     <details style="margin-top:4px"><summary class="muted" style="cursor:pointer;font-size:12.5px">+ New head</summary>
-      <input name="new_head" class="full" placeholder="Name of the new head (also added to Master data)" style="margin-top:4px">
+      <div class="row2" style="margin-top:4px">
+        <input name="new_head" class="full" placeholder="Name of the new head (also added to Master data)">
+        <select name="new_head_parent" class="full" aria-label="Under">
+          <option value="">Under: — top level —</option>
+          {% for h in heads %}<option value="{{ h.id }}">Under: {{ head_label(h) }}</option>{% endfor %}
+        </select>
+      </div>
     </details>
+    {% if products %}
+    <div class="product-row">
+    <div><label>Product from the price list <span class="muted" style="font-weight:400">(optional)</span></label>
+    <select class="full js-product" aria-label="Product">
+      <option value="">— None —</option>
+      {% set ns = namespace(cat=None) %}
+      {% for p in products %}
+        {% set cat = p.category.path() if p.category else 'No category' %}
+        {% if cat != ns.cat %}{% if ns.cat is not none %}</optgroup>{% endif %}<optgroup label="{{ cat }}">{% set ns.cat = cat %}{% endif %}
+        <option value="{{ p.id }}" data-total="{{ p.total }}" data-name="{{ p.product }}">{{ p.product }} · ₹{{ p.total|inr }} incl. {{ '{:f}'.format(p.gst_rate.normalize()) }}% GST</option>
+      {% endfor %}
+      {% if ns.cat is not none %}</optgroup>{% endif %}
+    </select></div>
+    <div><label>Qty</label><input class="full js-qty num" type="number" min="0" step="any" value="1" aria-label="Quantity" disabled></div>
+    </div>
+    <p class="muted js-product-note" style="font-size:12.5px;margin:4px 0 0" hidden></p>
+    {% endif %}
     <label>Title</label>
     <input name="title" class="full" maxlength="200" placeholder="e.g. PO-V-221 components">
+    {{ vendor_field(vendors, direction) }}
     <div class="row2">
       <div><label>Amount (₹)</label><input name="amount" class="full" inputmode="decimal" placeholder="1,00,000"></div>
       <div><label>Planned date</label><input type="date" name="planned_date" class="full" value="{{ date }}"
                                              data-today="{{ today().isoformat() }}"></div>
     </div>
+    {% if direction == 'IN' %}
+    <div class="share-box">
+      <label class="check" style="margin:10px 0 0">Our share
+        <input name="share_pct" class="js-share" value="100" inputmode="decimal" style="width:70px;text-align:right"> %
+        <span class="muted" style="font-size:12.5px">100% = not shared with another company</span>
+      </label>
+      <div class="share-extra" hidden>
+        <p class="muted" style="font-size:12.5px;margin:6px 0">We receive the full amount; the partner's part
+          (<b class="js-share-amt">₹0</b>) is added as a separate expense:</p>
+        <div class="row3">
+          <div><label>Head for the partner's share</label>
+            <select name="share_head_id" class="full"><option value="">Choose a head…</option>
+              {% for h in share_heads %}<option value="{{ h.id }}">{{ head_label(h) }}</option>{% endfor %}</select></div>
+          <div><label>Title</label><input name="share_title" class="full" placeholder="Partner share – (title)"></div>
+          <div><label>Date it goes out</label><input type="date" name="share_date" class="full" value="{{ date }}"></div>
+        </div>
+        <div style="max-width:50%">{{ vendor_field(share_vendors, 'OUT', name='share_counterparty_id', new_name=None, label="Partner (party)") }}</div>
+      </div>
+    </div>
+    {% endif %}
     <label class="check" style="margin-top:10px">
       <input type="checkbox" name="already_settled" value="1" {{ 'checked' if date and date < today().isoformat() }}>
       Already {{ 'received' if direction == 'IN' else 'paid' }} on this date (today or earlier) — Lekka will look for its plan
     </label>
     <label>Remarks (optional)</label>
     <textarea name="remarks" maxlength="1000"></textarea>
-    <details><summary class="muted" style="cursor:pointer;font-size:12.5px;margin-top:8px">{{ 'More: counterparty, cost centre, reference' if show_cc else 'More: PO / invoice no.' }}</summary>
-      <div class="{{ 'row3' if show_cc else '' }}">
+    <details><summary class="muted" style="cursor:pointer;font-size:12.5px;margin-top:8px">{{ 'More: cost centre, reference' if show_cc else 'More: PO / invoice no.' }}</summary>
+      <div class="{{ 'row2' if show_cc else '' }}">
         {% if show_cc %}
-        <div><label>Counterparty</label>
-          <select name="counterparty_id" class="full"><option value="">—</option>
-            {% for c in counterparties %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
         <div><label>Cost centre</label>
           <select name="cost_centre_id" class="full"><option value="">—</option>
             {% for c in cost_centres %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>

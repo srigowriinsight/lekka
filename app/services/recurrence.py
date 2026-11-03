@@ -73,10 +73,10 @@ def horizon(tpl: RecurringTemplate) -> date:
 def _validate(data: dict) -> dict:
     out = {}
     out["title"] = _check_title(data.get("title"))
-    out["head_id"] = _check_head(data.get("head_id")).id
     if data.get("direction") not in (IN, OUT):
         raise LekkaError("Choose inflow or outflow.")
     out["direction"] = data["direction"]
+    out["head_id"] = _check_head(data.get("head_id"), direction=data["direction"]).id
     amt = money(data.get("amount"))
     if amt <= 0:
         raise LekkaError("The amount must be more than ₹0.")
@@ -193,6 +193,9 @@ def is_untouched(root: CashflowEntry) -> bool:
 
 
 def _delete_tree(root):
+    from .entries import _unlink_share_parts
+    _unlink_share_parts([root] + root.descendants())
+    db.session.flush()
     for n in sorted([root] + root.descendants(), key=lambda x: -x.depth):
         if n.parent is not None:
             n.parent.children.remove(n)

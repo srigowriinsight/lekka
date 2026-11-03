@@ -283,3 +283,17 @@ def test_two_instalments(plan, set_today):                     # PS-09 style
     assert c[0].id == rest.id
     link_and_settle(rest, 600, date(2026, 11, 27))
     assert closing_on(date(2026, 11, 27)) == D("101000")
+
+
+def test_lateness_counts_from_the_first_due_date(app, head, set_today):
+    from app.services.entries import create_entry, lateness, reschedule, settle, slip_note
+    set_today("2026-11-20")
+    e = create_entry(direction="OUT", head_id=head("Rent").id, title="Rent", amount=1000, planned_date="2026-11-15")
+    reschedule(e, "2026-11-22")                        # it was overdue, then moved
+    set_today("2026-11-25")
+    settle(e, date(2026, 11, 25))
+    days, text = lateness(e)
+    assert days == 10 and text == "Paid 10 days late: due 15 Nov, paid 25 Nov; moved 1 time to 22 Nov"
+    f = create_entry(direction="IN", head_id=head("Sales").id, title="Inv", amount=500, planned_date="2026-11-25")
+    settle(f, date(2026, 11, 25))
+    assert lateness(f)[0] == 0 and slip_note(f) is None

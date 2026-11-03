@@ -5,11 +5,12 @@ from decimal import Decimal
 
 from ..extensions import db
 from ..models import (ACTIVE, CANCELLED, DELETED, IN, OUT, Account, BalanceAdjustment, CashflowEntry,
-                      Head, RescheduleLog)
+                      Counterparty, Head, RescheduleLog)
 from .common import LekkaError, audit, inr, money, parse_date, snapshot, today, user_id
 
 ENTRY_FIELDS = ["title", "amount", "planned_date", "is_settled", "settled_on", "lifecycle",
-                "head_id", "direction", "remarks", "cancel_reason", "reschedule_count"]
+                "head_id", "direction", "remarks", "cancel_reason", "reschedule_count", "counterparty_id"]
+PAISA = Decimal("0.01")
 MAX_REMARKS = 1000
 
 
@@ -95,14 +96,37 @@ def status_label(e: CashflowEntry, t: date | None = None) -> str:
     return "Planned"
 
 
-def slip_note(e: CashflowEntry) -> str | None:
-    """'planned 19 Nov, received 20 Nov, 1 day late' for ticked items whose dates differ."""
-    if not (e.is_leaf and e.is_settled and e.planned_date and e.settled_on != e.planned_date):
+def _days(n):
+    return f"{n} day{'s' if n != 1 else ''}"
+
+
+def _dm(d):
+    return f"{d.day} {d:%b}"
+
+
+def lateness(e: CashflowEntry):
+    """How a ticked item compares with when it was due. Measured from the FIRST due date, so an item that
+    went overdue and was then moved still shows how late the money really came.
+    Returns (days, text): days > 0 late, < 0 early, 0 on time; None when not ticked."""
+    if not (e.is_leaf and e.is_settled and e.planned_date and e.settled_on):
         return None
-    n = (e.settled_on - e.planned_date).days
-    word = "received" if e.direction == IN else "paid"
-    when = f"{abs(n)} day{'s' if abs(n) != 1 else ''} {'late' if n > 0 else 'early'}"
-    return f"planned {e.planned_date.day} {e.planned_date:%b}, {word} {e.settled_on.day} {e.settled_on:%b}, {when}"
+    word = "Received" if e.direction == IN else "Paid"
+    first = e.original_planned_date if (e.reschedule_count and e.original_planned_date) else e.planned_date
+    n = (e.settled_on - first).days
+    moved = ""
+    if first != e.planned_date:
+        moved = f"; moved {_days(e.reschedule_count).replace('day', 'time')} to {_dm(e.planned_date)}"
+    if n > 0:
+        return n, f"{word} {_days(n)} late: due {_dm(first)}, {word.lower()} {_dm(e.settled_on)}{moved}"
+    if n < 0:
+        return n, f"{word} {_days(-n)} early: due {_dm(first)}, {word.lower()} {_dm(e.settled_on)}{moved}"
+    return 0, f"{word} on the due date ({_dm(first)})" + moved
+
+
+def slip_note(e: CashflowEntry) -> str | None:
+    """Short line for lists and popups; only when the money did not move on its due date."""
+    r = lateness(e)
+    return r[1] if r and r[0] != 0 else None
 
 
 # ---------------------------------------------------------------- validation helpers
@@ -132,7 +156,7 @@ def _check_amount(amount):
     return a
 
 
-def _check_head(head_id, allow_inactive=False):
+def _check_head(head_id, allow_inactive=False, direction=None):
     if not head_id:
         raise LekkaError("Choose a head.")
     head = db.session.get(Head, int(head_id))
@@ -140,6 +164,9 @@ def _check_head(head_id, allow_inactive=False):
         raise LekkaError("That head does not exist.")
     if not head.is_active and not allow_inactive:
         raise LekkaError(f"The head '{head.name}' is inactive; choose another.")
+    if direction and not head.fits(direction):
+        raise LekkaError(f"'{head.name}' is {'an expense' if head.kind == 'OUT' else 'a revenue'} head; choose a "
+                         f"{'revenue' if direction == IN else 'expense'} head, or set it to Both in Master data.")
     return head
 
 
@@ -183,7 +210,7 @@ def create_entry(*, direction, head_id, title, amount, planned_date, remarks=Non
                  settled_on=None, template_id=None, occurrence_date=None, audit_action="create"):
     if direction not in (IN, OUT):
         raise LekkaError("Choose inflow or outflow.")
-    head = _check_head(head_id)
+    head = _check_head(head_id, direction=direction)
     e = CashflowEntry(
         direction=direction, head_id=head.id, title=_check_title(title), amount=_check_amount(amount),
         planned_date=parse_date(planned_date, "planned date"), remarks=_check_remarks(remarks),
@@ -204,8 +231,12 @@ def create_entry(*, direction, head_id, title, amount, planned_date, remarks=Non
 
 def edit_entry(e: CashflowEntry, *, title=None, amount=None, remarks=None, head_id=None,
                counterparty_id=None, cost_centre_id=None, reference_no=None,
-               expected_version=None, remarks_note=None):
+               expected_version=None, remarks_note=None, follow_shares=True):
+    """counterparty_id: None = leave as is, "" = clear (no vendor), an id = set. Set on a top item, it applies
+    to all its parts. follow_shares: an amount change inside a shared revenue keeps its partner share at the
+    same % (the Edit popup of the revenue itself passes False and asks the % again instead)."""
     check_version(e, expected_version)
+    ctx = _share_context(e) if follow_shares and amount is not None else None
     old = snapshot(e, ENTRY_FIELDS)
     if title is not None:
         e.title = _check_title(title)
@@ -214,7 +245,11 @@ def edit_entry(e: CashflowEntry, *, title=None, amount=None, remarks=None, head_
     if reference_no is not None:
         e.reference_no = reference_no.strip() or None
     if counterparty_id is not None:
-        e.counterparty_id = counterparty_id or None
+        cp = int(counterparty_id) if str(counterparty_id).strip() else None
+        if cp is not None and db.session.get(Counterparty, cp) is None:
+            raise LekkaError("That party no longer exists. Reload and choose again.")
+        for node in [e] + (e.descendants() if e.parent_id is None else []):
+            node.counterparty_id = cp
     if cost_centre_id is not None:
         e.cost_centre_id = cost_centre_id or None
     if amount is not None:
@@ -235,13 +270,14 @@ def edit_entry(e: CashflowEntry, *, title=None, amount=None, remarks=None, head_
     if head_id is not None and int(head_id) != e.head_id:
         if e.parent_id:
             raise LekkaError("Split parts always use their parent's head; change the head on the top item.")
-        head = _check_head(head_id)
+        head = _check_head(head_id, direction=e.direction)
         for node in [e] + e.descendants():
             node.head_id = head.id
     if e.template_id and e.parent_id is None:
         e.is_overridden = True
     _touch(e)
     audit("cashflow_entry", e.id, "edit", remarks_note, old=old, new=snapshot(e, ENTRY_FIELDS))
+    e.share_note = _follow_shares(ctx)
     return e
 
 
@@ -258,6 +294,10 @@ def _clean_parts(parts, default_title):
             "amount": _check_amount(p.get("amount")),
             "planned_date": parse_date(p.get("planned_date"), f"date for part {i}"),
             "remarks": _check_remarks(p.get("remarks")),
+            # date of the matching partner-share part (shared revenue only); blank = keep the old date
+            "share_date": (check_not_before_opening(parse_date(p["share_date"], f"partner share date for part {i}"),
+                                                    "The partner share date")
+                           if str(p.get("share_date") or "").strip() else None),
         })
     return clean
 
@@ -285,8 +325,11 @@ def split_entry(e: CashflowEntry, parts, remarks=None, expected_version=None, lo
     total = sum((p["amount"] for p in clean), Decimal("0"))
     if total != e.amount:
         raise LekkaError(_sum_message(total, e.amount))
+    ctx = _share_context(e)
     for p in clean:
-        db.session.add(_child(e, p))
+        c = _child(e, p)
+        c.share_date_hint = p.get("share_date")
+        db.session.add(c)
     if e.original_planned_date is None:
         e.original_planned_date = e.planned_date
     e.planned_date = None
@@ -296,6 +339,7 @@ def split_entry(e: CashflowEntry, parts, remarks=None, expected_version=None, lo
         audit("cashflow_entry", e.id, "split", _check_remarks(remarks),
               new={"parts": [{"title": p["title"], "amount": str(p["amount"]),
                               "planned_date": p["planned_date"].isoformat()} for p in clean]})
+    e.share_note = _follow_shares(ctx)
     return e
 
 
@@ -317,6 +361,7 @@ def edit_split(parent: CashflowEntry, parts, new_total=None, remarks=None):
     if any(not c.is_leaf for c in parent.children):
         raise LekkaError("Some parts are split further; edit those lower levels directly.")
     clean = _clean_parts(parts, parent.title)
+    ctx = _share_context(parent)
     by_id = {c.id: c for c in parent.children}
     locked = [c for c in parent.children if c.is_settled or c.is_cancelled]
     seen = set()
@@ -339,10 +384,15 @@ def edit_split(parent: CashflowEntry, parts, new_total=None, remarks=None):
     if total != target:
         raise LekkaError(_sum_message(total, target))
     old = [{"id": c.id, "title": c.title, "amount": str(c.amount)} for c in parent.children]
-    for c in list(parent.children):
-        if c.id not in seen and not (c.is_settled or c.is_cancelled):
-            parent.children.remove(c)
-            db.session.delete(c)
+    gone = [c for c in parent.children if c.id not in seen and not (c.is_settled or c.is_cancelled)]
+    _unlink_share_parts(gone)
+    db.session.flush()
+    for c in gone:
+        parent.children.remove(c)
+        db.session.delete(c)
+    for p in clean:
+        if p["id"] and int(p["id"]) in by_id:
+            by_id[int(p["id"])].share_date_hint = p.get("share_date")
     for p in editable:
         if p["id"]:
             c = by_id[int(p["id"])]
@@ -352,7 +402,9 @@ def edit_split(parent: CashflowEntry, parts, new_total=None, remarks=None):
                 c.planned_date = p["planned_date"]
             _touch(c)
         else:
-            db.session.add(_child(parent, p))
+            c = _child(parent, p)
+            c.share_date_hint = p.get("share_date")
+            db.session.add(c)
     if len([c for c in parent.children if not c.is_cancelled]) + sum(1 for p in editable if not p["id"]) < 1:
         raise LekkaError("A split needs at least one live part.")
     parent.amount = target
@@ -361,6 +413,7 @@ def edit_split(parent: CashflowEntry, parts, new_total=None, remarks=None):
     _recompute_ancestors(parent)
     audit("cashflow_entry", parent.id, "edit_split", _check_remarks(remarks), old={"parts": old},
           new={"parts": [{"id": c.id, "title": c.title, "amount": str(c.amount)} for c in parent.children]})
+    parent.share_note = _follow_shares(ctx)
     return parent
 
 
@@ -370,9 +423,12 @@ def remove_split(parent: CashflowEntry, remarks=None):
     nodes = parent.descendants()
     if any(n.is_settled for n in nodes):
         raise LekkaError("A part of this split is ticked; untick it before removing the split.")
+    ctx = _share_context(parent)
     first, _ = parent.date_range()
     if first is None:
         first = min((n.planned_date for n in nodes if n.planned_date), default=today())
+    _unlink_share_parts(nodes)
+    db.session.flush()
     for n in sorted(nodes, key=lambda x: -x.depth):
         if n.parent is not None:
             n.parent.children.remove(n)
@@ -381,6 +437,7 @@ def remove_split(parent: CashflowEntry, remarks=None):
     parent.lifecycle, parent.cancel_reason = ACTIVE, None
     _touch(parent)
     audit("cashflow_entry", parent.id, "remove_split", _check_remarks(remarks))
+    parent.share_note = _follow_shares(ctx)
     return parent
 
 
@@ -470,6 +527,38 @@ def move_targets(e: CashflowEntry):
 
 
 def cancel(e: CashflowEntry, reason, mode=None, target_id=None, expected_version=None):
+    """Cancel with a reason (see _cancel_item), then keep a revenue's partner share in line:
+    - the whole revenue cancelled: its unticked partner share is cancelled too ("revenue cancelled");
+    - a part of it cancelled: the matching part of the share is cancelled, and with Move the share part of
+      the part that received the money grows by the same %.
+    A partner share already ticked as paid is never changed; e.share_note says what to check."""
+    root = e.ancestors()[-1] if e.parent_id else e
+    ctx = _share_context(e)
+    _cancel_item(e, reason, mode, target_id, expected_version)
+    e.share_note = _sync_shares_after_cancel(root, ctx, reason) if ctx else None
+    return e
+
+
+def _sync_shares_after_cancel(root, ctx, reason):
+    shares = partner_shares(root)
+    if not shares:
+        return None
+    if root.is_cancelled:
+        done_ = []
+        for s in shares:
+            if any(x.is_settled for x in [s] + s.descendants()):
+                return (f"Partner share '{s.title}' is already ticked as paid, so it was kept; "
+                        f"check it with the partner")
+            cancel(s, f"Revenue '{root.title}' cancelled: {reason}"[:255])
+            done_.append(s)
+        return f"Its partner share ({', '.join(x.title for x in done_)}) was cancelled too"
+    try:
+        return _follow_shares(ctx)
+    except LekkaError as err:
+        return f"Partner share not changed: {err}"
+
+
+def _cancel_item(e: CashflowEntry, reason, mode=None, target_id=None, expected_version=None):
     """Cancel with a reason. For a part of a split, finance chooses each time: shrink the
     parent's total, or move the amount onto another unticked part. Nothing is pre-selected."""
     check_version(e, expected_version)
@@ -542,6 +631,9 @@ def delete_entry(e: CashflowEntry, expected_version=None, remarks=None):
     for n in nodes:
         n.lifecycle = DELETED
     _touch(e)
+    for s in CashflowEntry.query.filter(CashflowEntry.share_of_id == e.id, CashflowEntry.lifecycle != DELETED).all():
+        if not any(x.is_settled for x in [s] + s.descendants()):
+            delete_entry(s, remarks=f"Partner share of deleted '{e.title}'")
     audit("cashflow_entry", e.id, "delete", _check_remarks(remarks),
           old={"title": e.title, "amount": str(e.amount), "ticked_parts": sum(1 for n in nodes if n.is_settled)},
           new={"title": e.title})
@@ -559,6 +651,376 @@ def link_candidates(head_id, direction, amount, on_date):
     leaves = [e for e in q.all() if e.is_leaf]
     leaves.sort(key=lambda e: (e.amount != amount, abs((e.planned_date - on_date).days), e.planned_date, e.id))
     return leaves
+
+
+# ---------------------------------------------------------------- sharing revenue with partner companies
+
+def read_share(form, amount, revenue_title, revenue_date):
+    """Read 'Our share (%)' from the new-revenue form. 100 (the default) = no sharing.
+    Below 100: the partner's part becomes its own expense, with the head, title and date given then.
+    Returns None, or what add_partner_share needs. Checked before anything is saved."""
+    raw = (form.get("share_pct") or "100").strip().rstrip("%")
+    try:
+        pct = Decimal(raw)
+    except Exception:
+        raise LekkaError("Our share must be a number between 0 and 100.")
+    if pct < 0 or pct > 100:
+        raise LekkaError("Our share must be between 0 and 100%.")
+    if pct == 100:
+        return None
+    total = _check_amount(amount)
+    part = (total * (Decimal(100) - pct) / Decimal(100)).quantize(Decimal("0.01"))
+    if part <= 0:
+        return None
+    if not form.get("share_head_id"):
+        raise LekkaError("Choose the head for the partner's share.")
+    title = (form.get("share_title") or "").strip() or f"Partner share – {revenue_title}"
+    d = parse_date(form.get("share_date") or revenue_date, "date of the partner's share")
+    check_not_before_opening(d, "The date of the partner's share")
+    cp = form.get("share_counterparty_id") or None
+    if cp and db.session.get(Counterparty, int(cp)) is None:
+        raise LekkaError("That party no longer exists. Reload and choose again.")
+    return {"pct": pct, "amount": part, "head_id": int(form["share_head_id"]), "title": title, "date": d,
+            "counterparty_id": int(cp) if cp else None}
+
+
+def add_partner_share(revenue: CashflowEntry, share: dict):
+    """Record the partner's part of a revenue item as an expense linked to it. We receive the full amount;
+    the partner's part goes out as this separate expense on its own date."""
+    ours = share["pct"].normalize()
+    e = create_entry(direction=OUT, head_id=share["head_id"], title=share["title"], amount=share["amount"],
+                     planned_date=share["date"], counterparty_id=share.get("counterparty_id"),
+                     remarks=f"{Decimal(100) - share['pct']:.4g}% partner share of '{revenue.title}' "
+                             f"(our share {ours:f}%)")
+    e.share_of_id = revenue.id
+    return e
+
+
+def partner_shares(revenue: CashflowEntry):
+    """The live (not cancelled or deleted) partner-share expenses of a revenue item."""
+    return (CashflowEntry.query.filter(CashflowEntry.share_of_id == revenue.id, CashflowEntry.lifecycle == ACTIVE)
+            .order_by(CashflowEntry.id).all())
+
+
+def our_share_pct(revenue: CashflowEntry):
+    """Our share in %, worked out from the revenue and its partner shares (100 when not shared)."""
+    shares = partner_shares(revenue)
+    if not shares or not revenue.amount:
+        return Decimal(100)
+    part = sum((s.amount for s in shares), Decimal("0"))
+    return (Decimal(100) - part * 100 / revenue.amount).quantize(Decimal("0.01")).normalize()
+
+
+# ---------------------------------------------------------------- partner share follows its revenue
+
+def _share_context(e):
+    """Before a change inside a revenue item: its top item, its amount and its live partner shares' total,
+    so the shares can follow at the same proportion afterwards. None when there is nothing to follow."""
+    root = e if e.parent_id is None else db.session.get(CashflowEntry, e.root_id)
+    if root is None or root.direction != IN or root.is_deleted:
+        return None
+    shares = partner_shares(root)
+    if not shares:
+        return None
+    return root, root.amount, sum((s.amount for s in shares), Decimal("0"))
+
+
+def _follow_shares(ctx):
+    """After a change inside a shared revenue: keep its partner share at the same % and split the same way."""
+    if not ctx:
+        return None
+    root, rev_before, share_before = ctx
+    db.session.flush()
+    if root.is_cancelled or root.is_deleted:
+        return None                       # a cancelled or deleted revenue is handled by cancel() / delete_entry()
+    if root.amount == rev_before:
+        target = share_before
+    else:
+        target = (share_before * root.amount / rev_before).quantize(PAISA)
+    return sync_partner_shares(root, target)
+
+
+def _unlink_share_parts(revenue_nodes):
+    """Revenue parts about to be removed for good: partner-share parts that mirror them lose the link first."""
+    ids = [n.id for n in revenue_nodes if n.id]
+    if not ids:
+        return
+    for x in CashflowEntry.query.filter(CashflowEntry.share_of_id.in_(ids)).all():
+        if x.parent_id is not None:       # only parts of a share mirror revenue parts; a share itself stays linked
+            x.share_of_id = None
+
+
+def _date_of(x):
+    return x.settled_on if x.is_settled else (x.planned_date or x.original_planned_date)
+
+
+def _share_default_date(share, leaf, by_leaf):
+    """Default date for the share part that mirrors a revenue part: the date of the share part of the nearest
+    revenue part above it (the one that was split), else the share's own (old) date."""
+    for a in [leaf] + leaf.ancestors():
+        p = by_leaf.get(a.id)
+        if p is not None and _date_of(p):
+            return _date_of(p)
+    return _date_of(share) or today()
+
+
+def _spread(total, weights):
+    """Split `total` in proportion to `weights` (amounts); the last one takes the rounding."""
+    whole = sum(weights, Decimal("0"))
+    out, left = [], total
+    for i, w in enumerate(weights):
+        amt = left if i == len(weights) - 1 else (total * w / whole).quantize(PAISA)
+        left -= amt
+        out.append(amt)
+    return out
+
+
+def _locked_msg(s, root):
+    return (f"The partner share '{s.title}' is already ticked as paid, so it can't change by itself. "
+            f"Untick it first, or keep our share at {our_share_pct(root):f}%.")
+
+
+def sync_partner_shares(root: CashflowEntry, target_total):
+    """Make the revenue's live partner shares add up to `target_total` and mirror the revenue's split:
+    one share part per revenue part, each the same % of its revenue part, dated as asked in the split form
+    (default: the old date). Everything is checked before anything changes; a share part already ticked as
+    paid is never changed silently (the whole save is refused instead). Returns a short note, or None."""
+    shares = partner_shares(root)
+    if not shares:
+        return None
+    if target_total <= 0:
+        raise LekkaError("The partner share would become ₹0; set our share to 100% instead.")
+    old_total = sum((s.amount for s in shares), Decimal("0"))
+    targets = _spread(target_total, [s.amount for s in shares]) if old_total else [target_total]
+    leaves = [] if root.is_leaf else root.leaves()
+    live = [l for l in leaves if not l.is_cancelled]
+    plans, notes = [], []
+    for s, t in zip(shares, targets):
+        plan = _plan_share(s, t, root, leaves, live, notes)
+        if plan:
+            plans.append(plan)
+    for plan in plans:                       # nothing has changed before this point
+        plan()
+    db.session.flush()
+    changed = [s for s in shares if getattr(s, "share_changed", False)]
+    if changed:
+        parts = []
+        for s in changed:
+            if s.is_leaf:
+                parts.append(f"'{s.title}' ₹{inr(s.amount)}")
+            else:
+                live_parts = [c for c in s.children if not c.is_cancelled]
+                parts.append(f"'{s.title}' ₹{inr(s.amount)} in {len(live_parts)} part"
+                             f"{'s' if len(live_parts) != 1 else ''} (" +
+                             ", ".join(f"₹{inr(c.amount)} on {_date_of(c).day} {_date_of(c):%b}" for c in live_parts) + ")")
+        notes.insert(0, "Partner share follows: " + "; ".join(parts))
+    return ". ".join(notes) or None
+
+
+def _plan_share(s, t, root, leaves, live, notes):
+    """Work out (and check) what one partner share needs; return a function that does it, or None."""
+    nested = any(not c.is_leaf for c in s.children)
+    if nested:
+        notes.append(f"Partner share '{s.title}' is split by hand into several levels, so it was not changed; "
+                     f"check it")
+        return None
+    reason = f"Follows revenue '{root.title}'"
+
+    # ---- the revenue is one item: the share is one item too
+    if root.is_leaf:
+        if s.is_leaf:
+            if s.amount == t:
+                return None
+            if s.is_settled:
+                raise LekkaError(_locked_msg(s, root))
+            def do():
+                edit_entry(s, amount=t, remarks_note=f"Partner share recalculated: {reason}")
+                s.share_changed = True
+            return do
+        if any(c.is_settled for c in s.children):
+            raise LekkaError(f"A part of the partner share '{s.title}' is already ticked as paid; untick it "
+                             f"before the revenue's split can be removed.")
+        hint = getattr(root, "share_date_hint", None)
+        def do():
+            remove_split(s, reason)
+            if hint:
+                s.planned_date = hint
+            if s.amount != t:
+                edit_entry(s, amount=t, remarks_note=f"Partner share recalculated: {reason}")
+            s.share_changed = True
+        return do
+
+    # ---- the revenue is split: one share part per revenue part, same %
+    amounts = dict(zip([l.id for l in live], _spread(t, [l.amount for l in live]))) if live else {}
+    if s.is_leaf:
+        if s.is_settled:
+            if s.amount == t:
+                notes.append(f"Partner share '{s.title}' is already paid in full, so it stays one payment")
+                return None
+            raise LekkaError(_locked_msg(s, root))
+        rows = [l for l in live if amounts[l.id] > 0]
+        if len(rows) < 2:
+            if s.amount == t:
+                return None
+            def do():
+                edit_entry(s, amount=t, remarks_note=f"Partner share recalculated: {reason}")
+                s.share_changed = True
+            return do
+        def do():
+            if s.amount != t:
+                s.amount = t
+            parts = [{"title": f"{s.title} – {l.title}"[:200], "amount": amounts[l.id],
+                      "planned_date": getattr(l, "share_date_hint", None) or _share_default_date(s, l, {})}
+                     for l in rows]
+            split_entry(s, parts, remarks=reason)
+            for c, l in zip(sorted(s.children, key=lambda x: x.id), rows):
+                c.share_of_id = l.id
+            s.share_changed = True
+        return do
+
+    # the share is already split: match its parts to the revenue parts they mirror
+    by_leaf = {c.share_of_id: c for c in s.children if c.share_of_id and not c.is_cancelled}
+    leaf_ids = {l.id for l in leaves}
+    steps = []
+    for l in live:
+        amt = amounts[l.id]
+        c = by_leaf.get(l.id)
+        hint = getattr(l, "share_date_hint", None)
+        if c is None:
+            if amt > 0:
+                steps.append(("add", l, amt, hint or _share_default_date(s, l, by_leaf)))
+            continue
+        if c.is_settled:
+            if c.amount != amt:
+                raise LekkaError(f"The partner share part '{c.title}' is already ticked as paid "
+                                 f"(₹{inr(c.amount)}); following the revenue it would become ₹{inr(amt)}. "
+                                 f"Untick it first.")
+            continue
+        if amt == 0:
+            steps.append(("drop", c))
+        elif c.amount != amt or (hint and hint != c.planned_date):
+            steps.append(("set", c, amt, hint))
+    for l in leaves:
+        if l.is_cancelled and l.id in by_leaf:
+            c = by_leaf[l.id]
+            if c.is_settled:
+                notes.append(f"Partner share part '{c.title}' is already ticked as paid, so it was kept; "
+                             f"check it with the partner")
+            else:
+                steps.append(("cancel", c, f"Revenue part '{l.title}' cancelled: {l.cancel_reason or ''}"[:255]))
+    for c in s.children:
+        if c.is_cancelled or (c.share_of_id in leaf_ids):
+            continue
+        if c.is_settled:
+            raise LekkaError(f"The partner share part '{c.title}' is already ticked as paid and no longer "
+                             f"matches a part of the revenue. Untick it first.")
+        steps.append(("drop", c))
+    if not steps:
+        return None
+
+    def do():
+        old = [{"id": c.id, "title": c.title, "amount": str(c.amount)} for c in s.children]
+        for st in steps:
+            if st[0] == "add":
+                _, l, amt, d = st
+                c = _child(s, {"title": f"{s.title} – {l.title}"[:200], "amount": amt, "planned_date": d})
+                c.share_of_id = l.id
+                db.session.add(c)
+            elif st[0] == "set":
+                _, c, amt, d = st
+                c.amount = amt
+                if d and d != c.planned_date:
+                    c.original_planned_date = c.original_planned_date or c.planned_date
+                    c.planned_date = d
+                _touch(c)
+            elif st[0] == "drop":
+                s.children.remove(st[1])
+                db.session.delete(st[1])
+            elif st[0] == "cancel":
+                _cancel_leaf(st[1], st[2])
+        db.session.flush()
+        live_parts = [c for c in s.children if not c.is_cancelled]
+        if live_parts:
+            s.amount = sum((c.amount for c in live_parts), Decimal("0"))
+            if s.lifecycle == CANCELLED:
+                s.lifecycle, s.cancel_reason = ACTIVE, None
+        else:
+            s.lifecycle, s.cancel_reason = CANCELLED, "all parts cancelled"
+        _touch(s)
+        audit("cashflow_entry", s.id, "edit_split", reason, old={"parts": old},
+              new={"parts": [{"id": c.id, "title": c.title, "amount": str(c.amount)} for c in s.children]})
+        s.share_changed = True
+    return do
+
+
+def share_split_defaults(e: CashflowEntry):
+    """For the split form of a revenue item (or part) that has a partner share: the fraction that goes to the
+    partner, the default share date for a new part, and the current share date for each existing part."""
+    ctx = _share_context(e)
+    if not ctx:
+        return None
+    root, rev, share_total = ctx
+    shares = partner_shares(root)
+    by_leaf = {}
+    for s in shares:
+        for c in s.children:
+            if c.share_of_id and not c.is_cancelled:
+                by_leaf.setdefault(c.share_of_id, c)
+    s0 = shares[0]
+    default = _share_default_date(s0, e, by_leaf)
+    per_part = {c.id: (_date_of(by_leaf[c.id]) if c.id in by_leaf else default) for c in e.children}
+    return {"fraction": (share_total / rev) if rev else Decimal("0"), "default": default, "per_part": per_part,
+            "titles": ", ".join(s.title for s in shares)}
+
+
+def update_partner_share(revenue: CashflowEntry, form, before=None):
+    """After a revenue changes (amount, or the % asked again with the old % as default), bring its partner
+    share in line: new partner amount = revenue amount x (100 - our share %). `before` = (revenue amount,
+    shares total) before the edit: with the % unchanged, the share keeps exactly the same proportion.
+    - 100% now: the partner share is cancelled ('no longer shared').
+    - No share yet and below 100%: a new one is added (head, title, date and vendor asked, as for new revenue).
+    - A split revenue: the share is split the same way (see sync_partner_shares).
+    - A share already ticked as paid is never changed silently: the save is refused with a note.
+    Returns a short note for the message, or None when nothing changed."""
+    if "share_pct" not in form or revenue.direction != IN or revenue.parent_id:
+        return None
+    shares = partner_shares(revenue)
+    if not shares:
+        share = read_share(form, revenue.amount, revenue.title, revenue.planned_date or today())
+        if not share:
+            return None
+        s = add_partner_share(revenue, share)
+        if not revenue.is_leaf:
+            sync_partner_shares(revenue, s.amount)
+        return f"Partner share ₹{inr(s.amount)} added"
+    raw = (form.get("share_pct") or "100").strip().rstrip("%")
+    try:
+        pct = Decimal(raw)
+    except Exception:
+        raise LekkaError("Our share must be a number between 0 and 100.")
+    if pct < 0 or pct > 100:
+        raise LekkaError("Our share must be between 0 and 100%.")
+    old_total = sum((s.amount for s in shares), Decimal("0"))
+    rev_before, share_before = before or (revenue.amount, old_total)
+    pct_before = (Decimal(100) - share_before * 100 / rev_before).quantize(PAISA).normalize() if rev_before else None
+    if pct_before is not None and pct.quantize(PAISA).normalize() == pct_before:
+        new_total = (share_before if revenue.amount == rev_before
+                     else (share_before * revenue.amount / rev_before).quantize(PAISA))
+    else:
+        new_total = (revenue.amount * (Decimal(100) - pct) / Decimal(100)).quantize(PAISA)
+    if new_total == 0:
+        locked = [s for s in shares if any(x.is_settled for x in [s] + s.descendants())]
+        if locked:
+            raise LekkaError(_locked_msg(locked[0], revenue))
+        for s in shares:
+            cancel(s, "Revenue no longer shared")
+        return "Partner share cancelled (our share is now 100%)"
+    if new_total == old_total and (revenue.is_leaf or all(not s.is_leaf for s in shares)):
+        return None
+    note = sync_partner_shares(revenue, new_total)
+    if note and new_total != old_total:
+        note = f"Partner share now ₹{inr(new_total)} (our share {pct.normalize():f}%). " + note.split(": ", 1)[-1]
+    return note
 
 
 def open_plans_like(e: CashflowEntry, limit=5):

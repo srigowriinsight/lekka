@@ -17,8 +17,11 @@
       <label>New total (only if the overall amount changed)</label>
       <input name="new_total" placeholder="{{ e.amount|inr }}" style="width:180px">
     {% endif %}
-    <div class="parts" data-target="{{ e.amount }}">
-      <div class="part hdr"><span>Title</span><span>Amount (₹)</span><span>%</span><span>Planned date</span><span></span></div>
+    {% if share %}
+      <p class="share-note">This revenue is shared with a partner ({{ share.titles }}). The partner's share is split the same way, at the same %: pick the date each part of the share goes out (default: its old date).</p>
+    {% endif %}
+    <div class="parts {{ 'with-share' if share }}" data-target="{{ e.amount }}" {% if share %}data-share-fraction="{{ share.fraction }}"{% endif %}>
+      <div class="part hdr"><span>Title</span><span>Amount (₹)</span><span>%</span><span>Planned date</span>{% if share %}<span>Partner share goes out</span>{% endif %}<span></span></div>
       {% if editing %}
         {% for c in e.children %}
           {% set locked = c.is_settled or c.is_cancelled %}
@@ -28,6 +31,7 @@
             <input class="amt" name="part_amount" value="{{ c.amount }}" {{ 'readonly' if locked }}>
             <input class="pct" readonly tabindex="-1">
             <input class="dt" type="date" name="part_date" value="{{ (c.settled_on if c.is_settled else c.planned_date).isoformat() if (c.settled_on or c.planned_date) else '' }}" {{ 'readonly' if locked }}>
+            {% if share %}<span class="sh"><input type="date" name="part_share_date" value="{{ share.per_part[c.id].isoformat() }}" {{ 'readonly' if locked }} aria-label="Partner share date"><small class="sh-amt muted"></small></span>{% endif %}
             <input type="hidden" name="part_remarks" value="{{ c.remarks or '' }}">
             {% if not locked %}<button type="button" class="del linkish" title="Remove part">×</button>{% else %}<span title="Locked">🔒</span>{% endif %}
           </div>
@@ -40,6 +44,7 @@
             <input class="amt" name="part_amount" placeholder="0">
             <input class="pct" placeholder="%">
             <input class="dt" type="date" name="part_date" value="{{ e.planned_date.isoformat() if e.planned_date else '' }}">
+            {% if share %}<span class="sh"><input type="date" name="part_share_date" value="{{ share.default.isoformat() }}" aria-label="Partner share date"><small class="sh-amt muted"></small></span>{% endif %}
             <input type="hidden" name="part_remarks" value="">
             <button type="button" class="del linkish" title="Remove part">×</button>
           </div>
@@ -51,6 +56,7 @@
         <input class="amt" name="part_amount" placeholder="0" disabled>
         <input class="pct" placeholder="%" disabled>
         <input class="dt" type="date" name="part_date" value="{{ (e.planned_date or today()).isoformat() }}" disabled>
+        {% if share %}<span class="sh"><input type="date" name="part_share_date" value="{{ share.default.isoformat() }}" disabled aria-label="Partner share date"><small class="sh-amt muted"></small></span>{% endif %}
         <input type="hidden" name="part_remarks" value="" disabled>
         <button type="button" class="del linkish">×</button>
       </div>

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "partials/_m.html" import csrf, nextf %}
+{% block title %}Users{% endblock %}
+{% block content %}
+{% set back = url_for('users.index') %}
+<h1>Users</h1>
+<p class="muted" style="margin-top:0">Everyone in this list can log in and do everything in Lekka; there are no separate rights. Each change is recorded with the name of the person who made it (see History). People who leave are deactivated, not deleted, so their name stays on what they did.</p>
+
+<form method="post" action="{{ url_for('users.add') }}" class="price-add" id="add-user" autocomplete="off">
+  {{ csrf() }}{{ nextf(back) }}
+  <label>Name<input name="name" required maxlength="120" placeholder="e.g. Priya Raman" style="min-width:200px"></label>
+  <label>Username<input name="username" required maxlength="40" placeholder="e.g. priya" style="width:150px" autocomplete="off"></label>
+  <label>Password<input name="password" type="password" required minlength="{{ min_pw }}" placeholder="{{ min_pw }}+ characters" style="width:160px" autocomplete="new-password"></label>
+  <label>Password again<input name="password2" type="password" required minlength="{{ min_pw }}" style="width:160px" autocomplete="new-password"></label>
+  <button class="primary">+ Add user</button>
+</form>
+
+<table class="list price-list">
+  <thead><tr><th>Name</th><th>Username</th><th class="num">Changes made</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    {% set fid = 'u' ~ u.id %}
+    <tr>
+      <td>
+        <form method="post" id="{{ fid }}" action="{{ url_for('users.update', user_id=u.id) }}">{{ csrf() }}{{ nextf(back) }}</form>
+        <input name="name" form="{{ fid }}" value="{{ u.name or '' }}" maxlength="120" aria-label="Name" style="width:100%;min-width:200px" class="{{ 'struck' if not u.active }}">
+        {% if u.id == current_user.id %}<div class="muted sub">You</div>{% endif %}
+      </td>
+      <td><input name="username" form="{{ fid }}" value="{{ u.username }}" maxlength="40" aria-label="Username" style="width:160px"></td>
+      <td class="num">{{ changes.get(u.id, 0) }}</td>
+      <td>{{ 'Active' if u.active else 'Deactivated' }}</td>
+      <td class="acts">
+        <button class="small" form="{{ fid }}">Save</button>
+        <a class="btn small" href="#" data-dialog="{{ url_for('users.password', user_id=u.id, next=back) }}">{{ 'Change my password' if u.id == current_user.id else 'Reset password' }}</a>
+        {% if u.id != current_user.id %}
+        <form method="post" action="{{ url_for('users.update', user_id=u.id) }}" style="display:inline">
+          {{ csrf() }}{{ nextf(back) }}<input type="hidden" name="toggle" value="1">
+          <button class="small {{ 'danger-quiet' if u.active }}" {% if u.active %}data-confirm="Deactivate '{{ u.name }}'? They will be logged out and can no longer log in. Their name stays in History."{% endif %}>{{ 'Deactivate' if u.active else 'Activate' }}</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

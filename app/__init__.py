@@ -24,18 +24,23 @@ def create_app(config_object=None):
     from .models import User
 
     @login_manager.user_loader
-    def load_user(uid):
-        return db.session.get(User, int(uid))
+    def load_user(token):
+        uid, _, _ = str(token).partition(":")
+        u = db.session.get(User, int(uid)) if uid.isdigit() else None
+        if u is None or not u.active or u.login_token() != token:
+            return None        # deactivated, password changed, or an old cookie: log in again
+        return u
 
     from .blueprints import register
     register(app)
 
     from .services.common import inr, today
-    from .services.entries import slip_note, status, status_label
+    from .services.entries import lateness, slip_note, status, status_label
     app.jinja_env.filters["inr"] = inr
     from .services.history import label as action_label, when
-    app.jinja_env.globals.update(status=status, status_label=status_label, slip_note=slip_note, today=today,
-                                 when=when, action_label=action_label,
+    from .services.heads import label as head_label
+    app.jinja_env.globals.update(status=status, status_label=status_label, slip_note=slip_note, lateness=lateness, today=today,
+                                 when=when, action_label=action_label, head_label=head_label,
                                  show_cc=app.config.get("SHOW_COST_CENTRES", False))
 
     _register_cli(app)
@@ -48,7 +53,7 @@ def _register_cli(app):
     @click.option("--name", default=None)
     @click.password_option()
     def create_user(username, name, password):
-        """Create the Lekka login (version 1 has a single user)."""
+        """Create a login from the command line (users can also be added on the Users page)."""
         from .models import User
         if User.query.filter_by(username=username).first():
             raise click.ClickException("That username already exists.")
@@ -60,8 +65,10 @@ def _register_cli(app):
 
     @app.cli.command("ensure-user")
     def ensure_user():
-        """Hosting without a shell (Render free plan): create or update the login from LEKKA_USER and
-        LEKKA_PASSWORD (and optional LEKKA_NAME). Does nothing when they are not set."""
+        """Hosting without a shell (Render free plan): create the first login from LEKKA_USER and
+        LEKKA_PASSWORD (and optional LEKKA_NAME). An existing user keeps the password set on the Users page;
+        set LEKKA_RESET_PASSWORD=1 for one start to put LEKKA_PASSWORD back (e.g. a forgotten password).
+        Does nothing when they are not set."""
         import os
         from .models import User
         username, password = os.environ.get("LEKKA_USER"), os.environ.get("LEKKA_PASSWORD")
@@ -76,9 +83,12 @@ def _register_cli(app):
             u.set_password(password)
             db.session.add(u)
             click.echo(f"User '{username}' created.")
-        elif not u.check_password(password):
+        elif os.environ.get("LEKKA_RESET_PASSWORD") == "1":
             u.set_password(password)
-            click.echo(f"Password for '{username}' updated.")
+            u.active = True
+            click.echo(f"Password for '{username}' reset from LEKKA_PASSWORD.")
+        else:
+            click.echo(f"User '{username}' already exists; password left as is.")
         db.session.commit()
 
     @app.cli.command("set-password")

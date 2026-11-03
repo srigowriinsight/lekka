@@ -33,7 +33,7 @@ def test_login_required(app):
     "/", "/?freq=week", "/?freq=month", "/?freq=quarter", "/?freq=year", "/?freq=day&hide_empty=0",
     "/?freq=month&compact=1&expand=1", "/?freq=day&filter=pending", "/?freq=day&filter=settled",
     "/expenses", "/revenue", "/expenses?status=overdue", "/revenue?status=overdue", "/expenses?q=PO-V",
-    "/review", "/templates/", "/master/", "/master/?tab=cost_centres", "/master/?tab=counterparties",
+    "/review", "/templates/", "/master/", "/master/?tab=prices", "/master/?tab=cost_centres", "/master/?tab=counterparties",
     "/account", "/history", "/adjustments?a=2026-11-01&b=2026-11-25", "/templates/new", "/entries/new?direction=IN",
     "/master/heads/new",
 ])
@@ -417,3 +417,152 @@ def test_reset_a_period_removes_only_what_was_entered_then(demo_client):
     assert not by_title(old_title).is_deleted and by_title(old_title).amount == edit_amount
     assert closing_on(date(2026, 11, 30)) == before
     assert "Period reset" in demo_client.get("/history").get_data(as_text=True)
+
+
+def test_head_tree_in_master_data(demo_client):
+    sal = Head.query.filter_by(name="Salaries").first()
+    r = demo_client.post("/master/heads/add", data={"name": "Factory staff", "parent_id": sal.id, "head_kind": "OUT"}, headers=F)
+    assert r.get_json().get("redirect")
+    fs = Head.query.filter_by(name="Factory staff").first()
+    demo_client.post("/master/heads/add", data={"name": "Contract labour", "parent_id": fs.id, "head_kind": "OUT"}, headers=F)
+    cl = Head.query.filter_by(name="Contract labour").first()
+    assert cl.path() == "Salaries › Factory staff › Contract labour"
+    page = demo_client.get("/master/").get_data(as_text=True)
+    page = page[page.index("<tbody>"):]
+    assert page.index('value="Salaries"') < page.index('value="Factory staff"') < page.index('value="Contract labour"')
+    # a head can't go under its own sub-head
+    r = demo_client.post(f"/master/heads/{sal.id}", data={"name": "Salaries", "parent_id": cl.id}, headers=F)
+    assert "can't go under itself" in r.get_json()["error"]
+    # moving back to the top level works
+    demo_client.post(f"/master/heads/{fs.id}", data={"name": "Factory staff", "parent_id": ""}, headers=F)
+    assert db.session.get(Head, fs.id).parent_id is None
+    # pickers show sub-heads indented
+    html = demo_client.get("/entries/new?direction=OUT", headers=F).get_data(as_text=True)
+    assert "↳ Contract labour" in html
+
+
+def test_grid_parent_head_shows_subtotal(demo_client):
+    sal = Head.query.filter_by(name="Salaries").first()
+    demo_client.post("/master/heads/add", data={"name": "Contract staff", "parent_id": sal.id, "head_kind": "OUT"}, headers=F)
+    cs = Head.query.filter_by(name="Contract staff").first()
+    demo_client.post("/entries/new", data={"direction": "OUT", "head_id": cs.id, "title": "Contract wages",
+                                           "amount": "40,000", "planned_date": "2026-11-27"}, headers=F)
+    demo_client.post("/entries/new", data={"direction": "OUT", "head_id": sal.id, "title": "Bonus pool",
+                                           "amount": "10,000", "planned_date": "2026-11-27"}, headers=F)
+    from app.models import OUT
+    from app.services.balances import build_grid
+    g = build_grid(date(2026, 11, 27), date(2026, 11, 27), "day")
+    rows = {r.head.name: r for r in g.rows[OUT]}
+    assert rows["Salaries"].has_children and rows["Contract staff"].parent_id == sal.id
+    assert rows["Salaries"].cells[0].amount == Decimal("50000")        # own 10,000 + sub-head 40,000
+    assert rows["Contract staff"].cells[0].amount == Decimal("40000")
+    assert g.columns[0].total_out == Decimal("50000") + sum(
+        (r.cells[0].amount for r in g.rows[OUT] if r.depth == 0 and r.head.name != "Salaries" and 0 in r.cells),
+        Decimal("0"))
+    html = demo_client.get("/?freq=day&start=2026-11-27&end=2026-11-27").get_data(as_text=True)
+    assert f'data-parent="OUT-{sal.id}"' in html
+    pop = demo_client.get(f"/grid/cell?head={sal.id}&dir=OUT&a=2026-11-27&b=2026-11-27", headers=F).get_data(as_text=True)
+    assert "Contract wages" in pop and "Bonus pool" in pop and "Contract staff · " in pop
+    lst = demo_client.get(f"/expenses?start=2026-11-01&end=2026-11-30&head={sal.id}").get_data(as_text=True)
+    assert "Contract wages" in lst and "Salaries › Contract staff" in lst
+
+
+def test_revenue_shared_with_partner(demo_client):
+    sales = Head.query.filter_by(name="Product sales").first()
+    rent = Head.query.filter_by(name="Factory rent").first()
+    before = closing_on(date(2026, 11, 30))
+    form = {"direction": "IN", "head_id": sales.id, "title": "Joint order", "amount": "1,00,000",
+            "planned_date": "2026-11-27", "share_pct": "70"}
+    r = demo_client.post("/entries/new", data=form, headers=F)
+    assert "head for the partner" in r.get_json()["error"]                    # asked for, nothing saved
+    assert not CashflowEntry.query.filter_by(title="Joint order").count()
+    form.update(share_head_id=rent.id, share_title="Share to ABC Pvt", share_date="2026-11-29")
+    r = demo_client.post("/entries/new", data=form, headers=F)
+    assert r.get_json().get("redirect")
+    rev, part = by_title("Joint order"), by_title("Share to ABC Pvt")
+    assert rev.amount == Decimal("100000") and rev.direction == "IN"
+    assert part.amount == Decimal("30000") and part.direction == "OUT" and part.share_of_id == rev.id
+    assert part.planned_date == date(2026, 11, 29) and part.head_id == rent.id
+    assert closing_on(date(2026, 11, 30)) == before + 70000
+    html = demo_client.get(f"/entries/{rev.id}", headers=F).get_data(as_text=True)
+    assert "Partner share" in html and "Share to ABC Pvt" in html
+    # 100% (the default) means no partner expense; deleting the revenue removes its unticked share too
+    demo_client.post(f"/entries/{rev.id}/delete", data={"version": rev.version}, headers=F)
+    assert db.session.get(CashflowEntry, part.id).is_deleted
+    assert closing_on(date(2026, 11, 30)) == before
+    assert "Our share" in demo_client.get("/entries/new?direction=IN", headers=F).get_data(as_text=True)
+    assert "Our share" not in demo_client.get("/entries/new?direction=OUT", headers=F).get_data(as_text=True)
+
+
+def test_changing_shared_revenue_asks_share_again(demo_client):
+    sales = Head.query.filter_by(name="Product sales").first()
+    rent = Head.query.filter_by(name="Factory rent").first()
+    demo_client.post("/entries/new", data={"direction": "IN", "head_id": sales.id, "title": "Joint order",
+                                           "amount": "5,00,000", "planned_date": "2026-11-27", "share_pct": "70",
+                                           "share_head_id": rent.id, "share_title": "ABC share",
+                                           "share_date": "2026-11-29"}, headers=F)
+    rev, part = by_title("Joint order"), by_title("ABC share")
+    assert part.amount == Decimal("150000")
+    # Double-click a new amount: nothing saved yet, the Edit popup opens with the new amount and 70% filled in
+    r = demo_client.post(f"/entries/{rev.id}/amount", data={"amount": "600000", "version": rev.version}, headers=F)
+    url = r.get_json()["open"]
+    assert by_title("Joint order").amount == Decimal("500000")
+    pop = demo_client.get(url, headers=F).get_data(as_text=True)
+    assert 'value="600000"' in pop and 'name="share_pct"' in pop and 'value="70"' in pop
+    # Save with the same 70%: partner share follows the new amount
+    demo_client.post(f"/entries/{rev.id}/edit", data={"title": "Joint order", "amount": "600000", "head_id": sales.id,
+                                                      "share_pct": "70", "version": rev.version}, headers=F)
+    assert by_title("ABC share").amount == Decimal("180000")
+    # Change the % to 80: partner share 20% of 6,00,000
+    rev = by_title("Joint order")
+    demo_client.post(f"/entries/{rev.id}/edit", data={"title": "Joint order", "amount": "600000", "head_id": sales.id,
+                                                      "share_pct": "80", "version": rev.version}, headers=F)
+    assert by_title("ABC share").amount == Decimal("120000")
+    # Once the partner share is ticked, a change that would alter it is refused with the reason
+    s = by_title("ABC share")
+    demo_client.post(f"/entries/{s.id}/settle", data={"when": "today"}, headers=F)
+    rev = by_title("Joint order")
+    r = demo_client.post(f"/entries/{rev.id}/edit", data={"title": "Joint order", "amount": "700000",
+                                                          "head_id": sales.id, "share_pct": "80",
+                                                          "version": rev.version}, headers=F)
+    assert "already ticked as paid" in r.get_json()["error"]
+    assert by_title("Joint order").amount == Decimal("600000")          # nothing saved
+    # 100% cancels an unticked share
+    demo_client.post(f"/entries/{s.id}/unsettle", data={}, headers=F)
+    rev = by_title("Joint order")
+    demo_client.post(f"/entries/{rev.id}/edit", data={"title": "Joint order", "amount": "600000", "head_id": sales.id,
+                                                      "share_pct": "100", "version": rev.version}, headers=F)
+    assert by_title("ABC share").lifecycle == "CANCELLED"
+
+
+def test_cancelling_shared_revenue_cancels_or_shrinks_partner_share(demo_client):
+    sales = Head.query.filter_by(name="Product sales").first()
+    rent = Head.query.filter_by(name="Factory rent").first()
+    def shared(title, share_title):
+        demo_client.post("/entries/new", data={"direction": "IN", "head_id": sales.id, "title": title,
+                                               "amount": "5,00,000", "planned_date": "2026-11-27", "share_pct": "70",
+                                               "share_head_id": rent.id, "share_title": share_title,
+                                               "share_date": "2026-11-29"}, headers=F)
+        return by_title(title), by_title(share_title)
+    before = closing_on(date(2026, 11, 30))
+    # 1. whole revenue cancelled -> its partner share is cancelled too, nothing counted
+    rev, part = shared("Deal A", "Share A")
+    r = demo_client.post(f"/entries/{rev.id}/cancel", data={"reason": "Customer withdrew"}, headers=F)
+    assert r.get_json().get("redirect")
+    assert by_title("Share A").lifecycle == "CANCELLED" and "Customer withdrew" in by_title("Share A").cancel_reason
+    assert closing_on(date(2026, 11, 30)) == before
+    # 2. part of the revenue cancelled with Shrink -> partner share follows at the same 70%
+    rev, part = shared("Deal B", "Share B")
+    demo_client.post(f"/entries/{rev.id}/split", data={"part_id": ["", ""], "part_title": ["B1", "B2"],
+                                                        "part_amount": ["3,00,000", "2,00,000"],
+                                                        "part_date": ["2026-11-27", "2026-11-28"],
+                                                        "part_remarks": ["", ""], "version": rev.version}, headers=F)
+    b2 = by_title("B2")
+    demo_client.post(f"/entries/{b2.id}/cancel", data={"reason": "Smaller order", "mode": "shrink"}, headers=F)
+    assert by_title("Deal B").amount == Decimal("300000") and by_title("Share B").amount == Decimal("90000")
+    # 3. a partner share already paid is kept, and the message says so
+    rev, part = shared("Deal C", "Share C")
+    demo_client.post(f"/entries/{part.id}/settle", data={"when": "today"}, headers=F)
+    demo_client.post(f"/entries/{rev.id}/cancel", data={"reason": "Lost"}, headers=F)
+    assert by_title("Share C").is_settled and by_title("Share C").lifecycle == "ACTIVE"
+    assert "already ticked as paid" in demo_client.get("/").get_data(as_text=True)

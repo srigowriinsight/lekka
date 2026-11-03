@@ -115,7 +115,9 @@ def history():
                                  "to": d_to.isoformat() if d_to else ""}.items() if v}
     return render_template("history.html", rows=rows, page=page, more=len(raw) > size, f=filters,
                            kinds=[("", "Everything"), ("items", "Items"), ("templates", "Recurring templates"),
-                                  ("account", "Account and adjustments"), ("heads", "Heads")],
+                                  ("account", "Account and adjustments"), ("heads", "Heads"),
+                                  ("vendors", "Parties"), ("prices", "Price list and categories"),
+                                  ("users", "Users")],
                            whats=[("", "Any change"), ("added", "Added"), ("ticked", "Ticked"),
                                   ("unticked", "Unticked"), ("rescheduled", "Rescheduled"), ("split", "Split"),
                                   ("cancelled", "Cancelled or ended"), ("changed", "Changed"),

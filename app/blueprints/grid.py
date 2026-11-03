@@ -10,6 +10,7 @@ from ..extensions import db
 from ..models import IN, OUT, CostCentre, Head
 from ..services.balances import FREQS, build_grid, cell_items, due_today_items, fy_start, overdue_items
 from ..services.common import LekkaError, inr, parse_date, today
+from ..services.heads import tree_order
 from ..services.recurrence import extend_all
 from ._util import fragment
 
@@ -96,7 +97,7 @@ def index():
     return render_template("grid.html", g=g, p=p, IN=IN, OUT=OUT, prev_range=prev_range, acc=acc,
                            account_set=account_set,
                            next_range=next_range, cost_centres=CostCentre.query.filter_by(is_active=True).all(),
-                           heads=Head.query.filter_by(is_active=True).order_by(Head.sort_order, Head.name).all())
+                           heads=tree_order(Head.query.filter_by(is_active=True).all()))
 
 
 @bp.route("/grid/cell")
@@ -145,13 +146,17 @@ def export():
     def block(name, direction, total_attr):
         ws.append([name])
         ws.cell(ws.max_row, 1).fill = band
-        for head, cells, items in g.rows[direction]:
-            ws.append([head.name] + [float(cells[i].amount) if i in cells else None for i in range(len(g.columns))])
+        for row in g.rows[direction]:
+            pad = "    " * row.depth
+            ws.append([pad + row.head.name] + [float(row.cells[i].amount) if i in row.cells else None
+                                               for i in range(len(g.columns))])
+            if row.has_children:
+                ws.cell(ws.max_row, 1).font = bold
             if p["expand_all"]:
-                for it in items:
+                for it in row.items:
                     e = it["entry"]
-                    ws.append(["    " + e.title] + [float(it["cells"][i]["amount"]) if i in it["cells"] else None
-                                                    for i in range(len(g.columns))])
+                    ws.append([pad + "    " + e.title] + [float(it["cells"][i]["amount"]) if i in it["cells"] else None
+                                                          for i in range(len(g.columns))])
         ws.append([f"Total {name.lower()}"] + [float(getattr(c, total_attr)) for c in g.columns])
         ws.cell(ws.max_row, 1).font = bold
 

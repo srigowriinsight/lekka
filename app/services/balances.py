@@ -10,6 +10,7 @@ Closing = Opening + In - Out + Adjustments, and each opening is the previous clo
 """
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import NamedTuple
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -193,10 +194,32 @@ class Column:
     is_empty: bool = True
 
 
+class Row(NamedTuple):
+    """One head line in the grid. `cells` include its sub-heads (subtotals); `items` are its own items."""
+    head: object
+    cells: dict
+    items: list
+    depth: int = 0
+    parent_id: int | None = None
+    has_children: bool = False
+
+
+def _sum_cells(parts):
+    out = Cell()
+    for c in parts:
+        out.amount += c.amount
+        out.shown += c.shown
+        out.items.extend(c.items)
+        out.cancelled.extend(c.cancelled)
+        for s, v in c.by_status.items():
+            out.by_status[s] += v
+    return out
+
+
 @dataclass
 class Grid:
     columns: list
-    rows: dict        # direction -> list of (head, {col_index: Cell}, items_by_entry)
+    rows: dict        # direction -> list of Row, in head-tree order (parents before their sub-heads)
     today: date
     freq: str
 
@@ -285,23 +308,48 @@ def build_grid(start: date, end: date, freq: str = "day", t: date | None = None,
                 for ent in item_rows[d][h].values():
                     ent["cells"] = {remap[i]: v for i, v in ent["cells"].items() if i in remap}
 
-    heads = {h.id: h for h in Head.query.all()}
+    from .heads import tree_order
+    tree = tree_order()                     # every head, parents before their sub-heads, with depth
+    heads = {h.id: h for h in tree}
     rows = {}
     for d in (IN, OUT):
-        ordered = sorted(heads_used[d], key=lambda hid: (heads[hid].sort_order, heads[hid].name.lower()))
-        rows[d] = [(heads[hid], cells[d][hid],
-                    sorted(item_rows[d][hid].values(),
-                           key=lambda x: (min(x["cells"]) if x["cells"] else 0, x["entry"].id)))
-                   for hid in ordered]
+        shown = set()
+        for hid in heads_used[d]:           # a head with items, plus every head above it
+            shown.add(hid)
+            shown.update(a.id for a in heads[hid].ancestors())
+        kids = {}
+        for h in tree:
+            if h.id in shown and h.parent_id in shown:
+                kids.setdefault(h.parent_id, []).append(h.id)
+        totals = {}
+
+        def total(hid):                     # a head's cells = its own items + all its sub-heads
+            if hid not in totals:
+                own = cells[d].get(hid, {})
+                parts = [own] + [total(k) for k in kids.get(hid, [])]
+                idx = set().union(*[p.keys() for p in parts])
+                totals[hid] = {i: _sum_cells([p[i] for p in parts if i in p]) for i in sorted(idx)}
+            return totals[hid]
+
+        rows[d] = [Row(h, total(h.id),
+                       sorted(item_rows[d][h.id].values(),
+                              key=lambda x: (min(x["cells"]) if x["cells"] else 0, x["entry"].id)),
+                       h.depth if h.parent_id in shown else 0,
+                       h.parent_id if h.parent_id in shown else None,
+                       bool(kids.get(h.id)))
+                   for h in tree if h.id in shown]
     return Grid(cols, rows, t, freq)
 
 
 def cell_items(head_id, direction, a: date, b: date, t: date | None = None):
-    """Items behind one grid cell, overdue first, then due soon, planned, settled; cancelled last."""
+    """Items behind one grid cell (the head and its sub-heads), overdue first, then due soon, planned,
+    settled; cancelled last."""
     t = t or today()
     acc = get_account()
+    head = db.session.get(Head, int(head_id))
+    ids = set(head.subtree_ids()) if head else {int(head_id)}
     items = [e for e in leaves_between(a, b, include_cancelled=True)
-             if e.head_id == int(head_id) and e.direction == direction and display_date(e) >= acc.opening_date]
+             if e.head_id in ids and e.direction == direction and display_date(e) >= acc.opening_date]
     order = {"OVERDUE": 0, "DUE_SOON": 1, "PLANNED": 2, "SETTLED": 3, "CANCELLED": 4}
     items.sort(key=lambda e: (order[status(e, t)], display_date(e), e.id))
     return items

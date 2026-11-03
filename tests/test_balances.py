@@ -119,7 +119,7 @@ def test_month_end_turns_plan_into_actual(demo, set_today):   # TC-126
 
 def test_head_cell_count_status_bar(demo):                    # TC-93 to TC-95
     g = build_grid(date(2026, 11, 1), date(2027, 1, 31), "month")
-    head, cells, items = [r for r in g.rows[IN] if r[0].name == "Product sales"][0]
+    head, cells, items = [r for r in g.rows[IN] if r[0].name == "Product sales"][0][:3]
     nov = cells[0]
     assert nov.amount == D("840000") and nov.count == 3 and nov.has_overdue
     bar = dict(nov.bar())
@@ -134,7 +134,8 @@ def test_cancelled_items_never_count(demo):                   # TC-43
     row = [r for r in g.rows[OUT] if r[0].name == "Trade shows"][0]
     cell = row[1][0]
     assert cell.amount == 0 and cell.count == 0 and cell.cancelled and cell.cancelled[0].title == "Trade-show booth"
-    assert g.columns[0].total_out == sum((c.amount for _, cells, _ in g.rows[OUT] for c in cells.values()), D("0"))
+    assert g.columns[0].total_out == sum((c.amount for r in g.rows[OUT] if r.depth == 0 for c in r.cells.values()),
+                                         D("0"))
     trade = cell_items(by_title("Trade-show booth").head_id, OUT, date(2026, 11, 1), date(2026, 11, 30))
     assert trade and trade[0].lifecycle == "CANCELLED"
 

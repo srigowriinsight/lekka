@@ -5,6 +5,7 @@ from flask_login import login_required
 from ..extensions import db
 from ..models import Head, RecurringTemplate
 from ..services import recurrence as rec
+from ..services.heads import tree_order
 from ..services.common import LekkaError, today
 from ._util import done, fragment, handles_errors, safe_next
 
@@ -42,7 +43,7 @@ def index():
 @login_required
 @handles_errors
 def new():
-    heads = Head.query.filter_by(is_active=True).order_by(Head.sort_order, Head.name).all()
+    heads = tree_order(Head.query.filter_by(is_active=True).all())
     if request.method == "GET":
         return fragment("partials/template_form.html", tpl=None, heads=heads, next=safe_next())
     tpl = rec.create_template(_form_data(request.form))
@@ -57,7 +58,7 @@ def edit(tpl_id):
     tpl = db.session.get(RecurringTemplate, tpl_id)
     if tpl is None:
         raise LekkaError("Template not found.")
-    heads = Head.query.order_by(Head.sort_order, Head.name).all()
+    heads = tree_order()
     if request.method == "GET":
         upcoming = [r for r in rec.occurrences(tpl) if r.occurrence_date >= today()][:6]
         return fragment("partials/template_form.html", tpl=tpl, heads=heads, upcoming=upcoming, next=safe_next())

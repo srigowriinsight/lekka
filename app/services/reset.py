@@ -4,7 +4,7 @@ today between 2 and 4 pm). Items entered earlier stay, even if they were changed
 Removed: expenses and revenue entered then (with all their parts), recurring templates added then (with
 every date they planned), and balance adjustments added then. Items are hidden the same way as Delete, so
 History still shows what was removed."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from flask import current_app
@@ -23,10 +23,13 @@ def parse_window(start: str, end: str):
         b = datetime.fromisoformat(end).replace(tzinfo=tz)
     except (TypeError, ValueError):
         raise LekkaError("Enter both the start and the end of the period.")
-    if b <= a:
+    if b < a:
         raise LekkaError("The end of the period must be after its start.")
+    # 'To' counts the whole minute shown (11:15 = up to 11:15:59), so something entered a few seconds ago
+    # is inside a window that ends "now".
+    b_incl = b + timedelta(minutes=1)
     to_utc = lambda d: d.astimezone(timezone.utc).replace(tzinfo=None)
-    return to_utc(a), to_utc(b), a, b
+    return to_utc(a), to_utc(b_incl), a, b
 
 
 def find(a, b):
@@ -49,6 +52,9 @@ def run(a, b, label: str):
     found = find(a, b)
     n_items = n_dates = 0
     for e in found["items"]:
+        if e.is_deleted:          # already removed together with another item (e.g. a revenue's partner share)
+            n_items += 1
+            continue
         delete_entry(e, remarks=f"Removed by the reset of {label}")
         n_items += 1
     for t in found["templates"]:

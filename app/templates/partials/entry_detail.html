@@ -12,17 +12,19 @@
   <div class="kv" style="margin:8px 0 12px">
     <div>Amount</div><div><b>₹{{ e.amount|inr }}</b> · {{ 'Inflow' if e.direction == 'IN' else 'Outflow' }}</div>
     <div>Head</div><div>{{ e.head.name }}</div>
-    <div>Status</div><div>{{ pill(e) }}{% if slip_note(e) %} · {{ slip_note(e) }}{% endif %}</div>
+    <div>Status</div><div>{{ pill(e) }}{% set lt = lateness(e) %}{% if lt %}<div class="late-note {{ 'is-late' if lt[0] > 0 else ('is-early' if lt[0] < 0 else '') }}">{{ lt[1] }}</div>{% endif %}</div>
     {% if e.is_leaf %}
       <div>Planned date</div><div>{{ dmy(e.planned_date) }}{% if e.reschedule_count %} · ↻{{ e.reschedule_count }}, first planned {{ dmy(e.original_planned_date) }}{% endif %}</div>
     {% else %}
       {% set r = e.date_range() %}<div>Dates</div><div>{{ dm(r[0]) }}{% if r[1] != r[0] %} – {{ dm(r[1]) }}{% endif %}</div>
     {% endif %}
-    {% if show_cc and e.counterparty %}<div>Counterparty</div><div>{{ e.counterparty.name }}</div>{% endif %}
+    {% if e.counterparty %}<div>Party</div><div>{{ e.counterparty.name }}{% if e.counterparty.gstin %} <span class="muted">· GSTIN {{ e.counterparty.gstin }}</span>{% endif %}</div>{% endif %}
     {% if show_cc and e.cost_centre %}<div>Cost centre</div><div>{{ e.cost_centre.name }}</div>{% endif %}
     {% if e.reference_no %}<div>Reference</div><div>{{ e.reference_no }}</div>{% endif %}
     {% if e.template %}<div>Recurring</div><div>{{ e.template.title }}{% if e.is_overridden %} · edited by hand{% endif %}</div>{% endif %}
     {% if e.is_cancelled %}<div>Cancelled</div><div>{{ e.cancel_reason }}</div>{% endif %}
+    {% if root.share_of %}<div>Partner share of</div><div><a href="#" data-dialog="{{ url_for('entries.detail', entry_id=root.share_of.id, next=next) }}">{{ root.share_of.title }}</a> · ₹{{ root.share_of.amount|inr }}</div>{% endif %}
+    {% for s in shares %}<div>{{ 'Partner share' if loop.first }}</div><div><a href="#" data-dialog="{{ url_for('entries.detail', entry_id=s.id, next=next) }}">{{ s.title }}</a> · ₹{{ s.amount|inr }} out on {{ dmy(s.planned_date or s.date_range()[0]) }} · {{ pill(s) }}</div>{% endfor %}
     <div>Remarks</div><div>{{ e.remarks or '—' }}</div>
   </div>
   {% if e.is_deleted %}

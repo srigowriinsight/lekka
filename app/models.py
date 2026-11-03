@@ -41,6 +41,15 @@ class User(UserMixin, db.Model):
     def is_active(self):
         return self.active
 
+    def login_token(self):
+        """What the login cookie remembers: the user and a fingerprint of the password, so changing a password
+        (or deactivating the user) logs them out on every other device."""
+        import hashlib
+        return f"{self.id}:{hashlib.sha256(self.password_hash.encode()).hexdigest()[:16]}"
+
+    def get_id(self):
+        return self.login_token()
+
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
 
@@ -49,12 +58,40 @@ class User(UserMixin, db.Model):
 
 
 class Head(db.Model):
-    """A category. One head can hold both inflow and outflow items."""
+    """A category. One head can hold both inflow and outflow items. Heads form a tree like the OPEX sheet
+    (Salaries > Factory staff > Contract labour); items can sit on any head, and a parent's figures in the
+    grid include its sub-heads."""
     __tablename__ = "head"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), unique=True, nullable=False)
     sort_order = db.Column(db.Integer, default=0, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey("head.id", name="fk_head_parent"), index=True)
+    # Which items may use it: IN = revenue heads, OUT = expense heads, BOTH = either.
+    kind = db.Column(db.String(4), nullable=False, default="BOTH", server_default="BOTH")
+
+    parent = db.relationship("Head", remote_side=[id], backref=db.backref("children", order_by="Head.sort_order"))
+
+    def fits(self, direction) -> bool:
+        return self.kind == "BOTH" or self.kind == direction
+
+    def ancestors(self):
+        out, node = [], self.parent
+        while node is not None:
+            out.append(node)
+            node = node.parent
+        return out
+
+    def path(self, sep=" › "):
+        return sep.join([a.name for a in reversed(self.ancestors())] + [self.name])
+
+    def subtree_ids(self):
+        ids, todo = [], [self]
+        while todo:
+            h = todo.pop()
+            ids.append(h.id)
+            todo.extend(h.children)
+        return ids
 
 
 class CostCentre(db.Model):
@@ -126,6 +163,8 @@ class CashflowEntry(TimestampMixin, db.Model):
     settled_on = db.Column(db.Date)
     lifecycle = db.Column(db.String(10), nullable=False, default=ACTIVE)
     cancel_reason = db.Column(db.String(255))
+    # A partner's share of a revenue item, recorded as its own expense (see services.entries.add_partner_share).
+    share_of_id = db.Column(db.Integer, db.ForeignKey("cashflow_entry.id", name="fk_entry_share_of"))
     template_id = db.Column(db.Integer, db.ForeignKey("recurring_template.id"))
     occurrence_date = db.Column(db.Date)
     is_overridden = db.Column(db.Boolean, nullable=False, default=False)
@@ -137,11 +176,12 @@ class CashflowEntry(TimestampMixin, db.Model):
     counterparty = db.relationship("Counterparty")
     cost_centre = db.relationship("CostCentre")
     template = db.relationship("RecurringTemplate")
-    parent = db.relationship("CashflowEntry", remote_side=[id], back_populates="children")
+    parent = db.relationship("CashflowEntry", remote_side=[id], back_populates="children", foreign_keys=[parent_id])
     children = db.relationship(
-        "CashflowEntry", back_populates="parent",
+        "CashflowEntry", back_populates="parent", foreign_keys=[parent_id],
         order_by="CashflowEntry.id",
     )
+    share_of = db.relationship("CashflowEntry", remote_side=[id], foreign_keys=[share_of_id])
 
     __table_args__ = (
         UniqueConstraint("template_id", "occurrence_date", name="uq_occurrence"),
@@ -223,6 +263,71 @@ class BalanceSnapshot(TimestampMixin, db.Model):
     as_of = db.Column(db.Date, nullable=False, unique=True)
     balance = db.Column(Money, nullable=False)
     remarks = db.Column(db.String(1000))
+
+
+class Category(db.Model):
+    """Product categories for the price list, as a tree (Controllers > PLC > Compact)."""
+    __tablename__ = "category"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey("category.id", name="fk_category_parent"), index=True)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    parent = db.relationship("Category", remote_side=[id],
+                             backref=db.backref("children", order_by="Category.sort_order"))
+
+    def ancestors(self):
+        out, node = [], self.parent
+        while node is not None:
+            out.append(node)
+            node = node.parent
+        return out
+
+    def path(self, sep=" › "):
+        return sep.join([a.name for a in reversed(self.ancestors())] + [self.name])
+
+    def subtree_ids(self):
+        ids, todo = [], [self]
+        while todo:
+            c = todo.pop()
+            ids.append(c.id)
+            todo.extend(c.children)
+        return ids
+
+
+class PriceItem(TimestampMixin, db.Model):
+    """Price list (Master data): a product's price before GST and its GST rate. The GST amount and the
+    total are worked out from these two every time, never stored, so they can't disagree."""
+    __tablename__ = "price_item"
+    id = db.Column(db.Integer, primary_key=True)
+    product = db.Column(db.String(160), unique=True, nullable=False)
+    price = db.Column(Money, nullable=False)                       # before GST
+    gst_rate = db.Column(db.Numeric(5, 2), nullable=False, default=Decimal("18"))
+    remarks = db.Column(db.String(255))
+    category_id = db.Column(db.Integer, db.ForeignKey("category.id", name="fk_price_item_category"), index=True)
+
+    category = db.relationship("Category")
+
+    __table_args__ = (
+        CheckConstraint("price >= 0", name="ck_price_item_price"),
+        CheckConstraint("gst_rate >= 0 AND gst_rate <= 100", name="ck_price_item_gst_rate"),
+    )
+
+    @property
+    def gst_amount(self) -> Decimal:
+        from decimal import ROUND_HALF_UP
+        return (Decimal(self.price) * Decimal(self.gst_rate) / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+
+    @property
+    def half_gst(self) -> Decimal:
+        """CGST and SGST each (sale within the state); IGST is the full gst_amount."""
+        from decimal import ROUND_HALF_UP
+        return (self.gst_amount / 2).quantize(Decimal("0.01"), ROUND_HALF_UP)
+
+    @property
+    def total(self) -> Decimal:
+        return Decimal(self.price) + self.gst_amount
 
 
 class AuditLog(db.Model):

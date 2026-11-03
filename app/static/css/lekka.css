@@ -227,3 +227,34 @@ dialog#pop::backdrop { background: rgba(20, 22, 26, .28); }
 
 /* long popups (e.g. a reset preview) scroll inside the window */
 dialog#pop { max-height: 92vh; overflow: auto; }
+
+/* head tree in the grid: parent rows carry the subtotal of their sub-heads */
+.grid tr.head-row.has-sub td.rowhead { font-weight: 700; }
+.grid tr.head-row.depth-1 td.rowhead, .grid tr.head-row.depth-2 td.rowhead, .grid tr.head-row.depth-3 td.rowhead { font-weight: 550; }
+.grid tr.head-row.has-sub td.cell .amt { font-weight: 700; }
+
+/* how late (or early) money came, shown where the ticked amount is opened */
+.late-note { margin-top: 4px; font-size: 12.5px; font-weight: 600; }
+.late-note.is-late { color: var(--bad-ink); }
+.late-note.is-early { color: var(--ok); }
+
+/* Price list (Master data) */
+.price-add { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line, #ddd); border-radius: 8px; }
+.price-add label { margin: 0; }
+.price-add label > input { display: block; margin-top: 3px; }
+.price-add .gst-calc { font-size: 13px; padding-bottom: 7px; font-variant-numeric: tabular-nums; }
+.price-list td { vertical-align: top; }
+.price-list .sub { font-size: 11.5px; margin-top: 2px; }
+.price-list input.num { text-align: right; }
+.price-list th.num { text-align: right; }
+.price-list th:first-child { width: 40%; }
+
+/* Split form of a shared revenue: one more column for the partner share's date */
+.parts.with-share .part { grid-template-columns: 1.4fr 1fr .5fr 1fr 1.25fr 24px; }
+.parts .part .sh { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.parts .part .sh small { font-size: 11px; }
+.share-note { font-size: 12.5px; margin: 4px 0 8px; padding: 6px 8px; border-left: 3px solid var(--accent, #c62828); background: var(--line-2, #f3f3f3); }
+dialog#pop:has(.parts.with-share) { width: min(800px, 96vw); }
+
+/* New revenue: product picker with a quantity */
+.product-row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; align-items: end; }

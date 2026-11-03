@@ -1,10 +1,25 @@
 {% from "partials/_m.html" import head_title, csrf, nextf %}
 <div class="pop">
-  {{ head_title('Add head', 'Heads live in Master data; one head works for both inflow and outflow') }}
+  {{ head_title('Add sub-head under ' ~ parent.name if parent else 'Add head', 'Heads live in Master data') }}
   <form method="post" action="{{ url_for('heads.add', kind='heads') }}" class="js-form">
     {{ csrf() }}{{ nextf(next) }}
     <div class="form-error"></div>
     <label>Name</label><input name="name" class="full" required placeholder="e.g. Packing material">
+    <label>Under (optional)</label>
+    <select name="parent_id" class="full">
+      <option value="">— Top level —</option>
+      {% for p in heads %}<option value="{{ p.id }}" {{ 'selected' if parent and parent.id == p.id }}>{{ head_label(p) }}</option>{% endfor %}
+    </select>
+    {% if parent and parent.kind != 'BOTH' %}
+      <label>For</label><div>{{ 'Revenue' if parent.kind == 'IN' else 'Expense' }} <span class="muted">(same as {{ parent.name }})</span></div>
+      <input type="hidden" name="head_kind" value="{{ parent.kind }}">
+    {% else %}
+      <label>For</label>
+      <div class="chips" style="gap:14px">
+        {% for k, l in head_kinds %}<label class="check"><input type="radio" name="head_kind" value="{{ k }}" {{ 'checked' if default_kind == k }} required> {{ l }}</label>{% endfor %}
+      </div>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 0">Expense heads are offered on expenses, revenue heads on revenue, Both on either.</p>
+    {% endif %}
     <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary">Add head</button></footer>
   </form>
 </div>

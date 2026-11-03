@@ -21,9 +21,11 @@
     <a href="{{ url_for('heads.index') }}" class="{{ 'on' if ep.startswith('heads.') }}">Master data</a>
     <a href="{{ url_for('accounts.index') }}" class="{{ 'on' if ep == 'accounts.index' }}">Account</a>
     <a href="{{ url_for('accounts.history') }}" class="{{ 'on' if ep == 'accounts.history' }}">History</a>
+    <a href="{{ url_for('users.index') }}" class="{{ 'on' if ep.startswith('users.') }}">Users</a>
   </nav>
   <span class="spacer"></span>
-  <span class="muted">Today {{ today().day }} {{ today().strftime('%b %Y') }} · {{ current_user.name or current_user.username }}</span>
+  <span class="muted">Today {{ today().day }} {{ today().strftime('%b %Y') }} ·
+    <a href="#" class="muted" data-dialog="{{ url_for('users.password', user_id=current_user.id, next=request.full_path) }}" title="Change my password">{{ current_user.name or current_user.username }}</a></span>
   <form method="post" action="{{ url_for('auth.logout') }}" style="margin-left:10px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="small">Log out</button>

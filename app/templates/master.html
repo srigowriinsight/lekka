@@ -4,49 +4,232 @@
 {% block content %}
 {% set cur = request.full_path %}
 <h1>Master data</h1>
-{% if show_cc %}
 <div class="chips" style="margin-bottom:12px">
   <a href="{{ url_for('heads.index', tab='heads') }}" class="{{ 'on' if tab == 'heads' }}">Heads</a>
+  <a href="{{ url_for('heads.index', tab='parties') }}" class="{{ 'on' if tab == 'parties' }}">Parties</a>
+  <a href="{{ url_for('heads.index', tab='categories') }}" class="{{ 'on' if tab == 'categories' }}">Categories</a>
+  <a href="{{ url_for('heads.index', tab='prices') }}" class="{{ 'on' if tab == 'prices' }}">Price list</a>
+  {% if show_cc %}
   <a href="{{ url_for('heads.index', tab='cost_centres') }}" class="{{ 'on' if tab == 'cost_centres' }}">Cost centres</a>
-  <a href="{{ url_for('heads.index', tab='counterparties') }}" class="{{ 'on' if tab == 'counterparties' }}">Counterparties</a>
+  {% endif %}
 </div>
-{% endif %}
 
 {% if tab == 'heads' %}
-  <p class="muted" style="margin-top:0">Heads are the categories in the grid and on the Expense and Revenue pages. One head can hold both inflow and outflow items. Order sets the order of rows in the grid; heads in use are deactivated, never deleted.</p>
-  <form method="post" action="{{ url_for('heads.add', kind='heads') }}" style="display:flex;gap:6px;margin-bottom:10px">
-    {{ csrf() }}{{ nextf(cur) }}<input name="name" placeholder="New head, e.g. Packing material" style="min-width:300px" required><button class="primary">+ Add head</button>
+  <p class="muted" style="margin-top:0">Heads are the categories in the grid and on the Expense and Revenue pages, arranged as a tree like the OPEX sheet: a head can have sub-heads, and a parent's figures in the grid include its sub-heads. <b>For</b> says where a head is offered: <b>Expense</b> heads on expenses, <b>Revenue</b> heads on revenue, <b>Both</b> on either. Sub-heads of an expense or revenue head are of the same kind. Order sets the order among heads at the same level; heads in use are deactivated, never deleted.</p>
+  <form method="post" action="{{ url_for('heads.add', kind='heads') }}" id="add-head" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+    {{ csrf() }}{{ nextf(url_for('heads.index')) }}
+    <input name="name" placeholder="New head, e.g. Packing material" style="min-width:300px" required {{ 'autofocus' if under }}>
+    <select name="head_kind" aria-label="For" required>
+      <option value="">For: revenue or expense?</option>
+      {% for k, l in head_kinds %}<option value="{{ k }}">For: {{ l }}</option>{% endfor %}
+    </select>
+    <label class="check" style="margin:0">Under
+      <select name="parent_id">
+        <option value="">— Top level —</option>
+        {% for p in heads %}<option value="{{ p.id }}" {{ 'selected' if under|string == p.id|string }}>{{ head_label(p) }}</option>{% endfor %}
+      </select></label>
+    <button class="primary">+ Add head</button>
   </form>
   <table class="list">
-    <thead><tr><th style="width:90px">Order</th><th>Head</th><th>Used for</th><th class="num">Items</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th style="width:80px">Order</th><th>Head</th><th>Under</th><th>For</th><th>Used now for</th><th class="num">Items</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {% for h in heads %}
+      {% set fid = 'h' ~ h.id %}
       <tr>
-        <td colspan="2">
-          <form method="post" action="{{ url_for('heads.update', kind='heads', obj_id=h.id) }}" style="display:flex;gap:6px;align-items:center">
-            {{ csrf() }}{{ nextf(cur) }}
-            <input name="sort_order" value="{{ h.sort_order }}" style="width:64px" aria-label="Order">
-            <input name="name" value="{{ h.name }}" style="flex:1;max-width:360px" class="{{ 'struck' if not h.is_active }}" aria-label="Name">
-            <button class="small">Save</button>
+        <td><input name="sort_order" form="{{ fid }}" value="{{ h.sort_order }}" style="width:60px" aria-label="Order"></td>
+        <td>
+          <form method="post" id="{{ fid }}" action="{{ url_for('heads.update', kind='heads', obj_id=h.id) }}" style="display:flex;gap:6px;align-items:center;padding-left:{{ h.depth * 22 }}px">
+            {{ csrf() }}{{ nextf(url_for('heads.index')) }}
+            {% if h.depth %}<span class="muted">↳</span>{% endif %}
+            <input name="name" value="{{ h.name }}" style="flex:1;max-width:320px;{{ 'font-weight:600' if h.children }}" class="{{ 'struck' if not h.is_active }}" aria-label="Name">
           </form>
         </td>
+        <td>
+          <select name="parent_id" form="{{ fid }}" aria-label="Under">
+            <option value="">— Top level —</option>
+            {% for p in heads if p.id not in h.subtree_ids() %}<option value="{{ p.id }}" {{ 'selected' if h.parent_id == p.id }}>{{ head_label(p) }}</option>{% endfor %}
+          </select>
+        </td>
+        <td>
+          <select name="head_kind" form="{{ fid }}" aria-label="For" {{ 'disabled' if h.parent and h.parent.kind != 'BOTH' }} title="{{ 'Follows its parent head' if h.parent and h.parent.kind != 'BOTH' }}">
+            {% for k, l in head_kinds %}<option value="{{ k }}" {{ 'selected' if h.kind == k }}>{{ l }}</option>{% endfor %}
+          </select>
+        </td>
         {% set dirs = used_for.get(h.id, []) %}
-        <td>{{ 'Both' if dirs|length == 2 else ('Inflow' if 'IN' in dirs else ('Outflow' if 'OUT' in dirs else '—')) }}</td>
+        <td>{{ 'Both' if dirs|length == 2 else ('Revenue' if 'IN' in dirs else ('Expense' if 'OUT' in dirs else '—')) }}</td>
         <td class="num">{{ usage.get(h.id, 0) }}</td>
         <td>{{ 'Active' if h.is_active else 'Inactive' }}</td>
         <td class="acts">
+          <button class="small" form="{{ fid }}">Save</button>
+          <a class="btn small" href="#" data-dialog="{{ url_for('heads.new_head_form', under=h.id, next=url_for('heads.index')) }}" title="Add a head inside '{{ h.name }}'">+ Sub-head</a>
           <form method="post" action="{{ url_for('heads.update', kind='heads', obj_id=h.id) }}" style="display:inline">
-            {{ csrf() }}{{ nextf(cur) }}<input type="hidden" name="toggle" value="1">
+            {{ csrf() }}{{ nextf(url_for('heads.index')) }}<input type="hidden" name="toggle" value="1">
             <button class="small">{{ 'Deactivate' if h.is_active else 'Activate' }}</button>
           </form>
         </td>
       </tr>
-    {% else %}<tr><td colspan="6" class="muted" style="padding:14px">No heads yet. Add the first one above.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="8" class="muted" style="padding:14px">No heads yet. Add the first one above.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+{% elif tab == 'parties' %}
+  {% set back = url_for('heads.index', tab='parties') %}
+  <p class="muted" style="margin-top:0">One list of everyone we pay or get paid by: suppliers, customers, partners. Every party is offered on both expenses and revenue, and choosing one on an item is always optional. A party on some items can't be removed; deactivate it instead and it stays on those items.</p>
+  <form method="post" action="{{ url_for('heads.add_vendor') }}" class="price-add" id="add-vendor">
+    {{ csrf() }}{{ nextf(back) }}
+    <label>Name<input name="name" placeholder="e.g. Sharma Electricals" required style="min-width:260px" maxlength="160" {{ 'autofocus' if not vendors }}></label>
+    <label>GSTIN (optional)<input name="gstin" maxlength="20" placeholder="29ABCDE1234F1Z5" style="width:180px"></label>
+    <button class="primary">+ Add party</button>
+  </form>
+  {% if vendors %}
+  <input type="search" class="js-price-search" data-target=".vendor-list" placeholder="Search parties" aria-label="Search parties" style="min-width:260px;margin:4px 0 8px">
+  {% endif %}
+  <table class="list vendor-list price-list">
+    <thead><tr><th>Name</th><th>GSTIN</th><th>Items</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for c in vendors %}
+      {% set fid = 'v' ~ c.id %}
+      {% set used = vendor_usage.get(c.id, {}) %}
+      <tr data-product="{{ c.name|lower }} {{ (c.gstin or '')|lower }}">
+        <td>
+          <form method="post" id="{{ fid }}" action="{{ url_for('heads.update_vendor', vendor_id=c.id) }}">{{ csrf() }}{{ nextf(back) }}</form>
+          <input name="name" form="{{ fid }}" value="{{ c.name }}" aria-label="Name" maxlength="160" style="width:100%;min-width:220px" class="{{ 'struck' if not c.is_active }}">
+        </td>
+        <td><input name="gstin" form="{{ fid }}" value="{{ c.gstin or '' }}" maxlength="20" aria-label="GSTIN" style="width:170px"></td>
+        <td style="white-space:nowrap">
+          {% if used.get('OUT') %}<a href="{{ url_for('entries.expenses', vendor=c.id, start='2000-01-01', end='2100-12-31') }}">{{ used['OUT'] }} expense{{ 's' if used['OUT'] != 1 }}</a>{% endif %}
+          {% if used.get('OUT') and used.get('IN') %} · {% endif %}
+          {% if used.get('IN') %}<a href="{{ url_for('entries.revenue', vendor=c.id, start='2000-01-01', end='2100-12-31') }}">{{ used['IN'] }} revenue</a>{% endif %}
+          {% if not used %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td>{{ 'Active' if c.is_active else 'Inactive' }}</td>
+        <td class="acts">
+          <button class="small" form="{{ fid }}">Save</button>
+          <form method="post" action="{{ url_for('heads.update_vendor', vendor_id=c.id) }}" style="display:inline">
+            {{ csrf() }}{{ nextf(back) }}<input type="hidden" name="toggle" value="1">
+            <button class="small">{{ 'Deactivate' if c.is_active else 'Activate' }}</button>
+          </form>
+          {% if not used %}
+          <form method="post" action="{{ url_for('heads.delete_vendor', vendor_id=c.id) }}" style="display:inline">
+            {{ csrf() }}{{ nextf(back) }}
+            <button class="small danger-quiet" data-confirm="Remove '{{ c.name }}' from the party list?">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="5" class="muted" style="padding:14px">No parties yet. Add the first one above, or type a new one straight into an expense or revenue item.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+{% elif tab == 'categories' %}
+  {% set back = url_for('heads.index', tab='categories') %}
+  <p class="muted" style="margin-top:0">Categories group the products in the price list. A category can have sub-categories, as deep as needed (Controllers › PLC › Compact). Choose the category of each product in the Price list. Order sets the order among categories at the same level.</p>
+  <form method="post" action="{{ url_for('heads.add_category') }}" class="price-add" id="add-category">
+    {{ csrf() }}{{ nextf(back) }}
+    <label>Name<input name="name" required maxlength="120" placeholder="e.g. PLC controllers" style="min-width:260px" {{ 'autofocus' if not categories }}></label>
+    <label>Under<select name="parent_id" style="display:block;margin-top:3px">
+      <option value="">— Top level —</option>
+      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if request.args.get('under')|string == c.id|string }}>{{ cat_label(c) }}</option>{% endfor %}
+    </select></label>
+    <button class="primary">+ Add category</button>
+  </form>
+  <table class="list price-list">
+    <thead><tr><th style="width:80px">Order</th><th>Category</th><th>Under</th><th class="num">Products</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for c in categories %}
+      {% set fid = 'c' ~ c.id %}
+      <tr>
+        <td><input name="sort_order" form="{{ fid }}" value="{{ c.sort_order }}" style="width:60px" aria-label="Order"></td>
+        <td>
+          <form method="post" id="{{ fid }}" action="{{ url_for('heads.update_category', cat_id=c.id) }}">{{ csrf() }}{{ nextf(back) }}</form>
+          <div style="display:flex;gap:6px;align-items:center;padding-left:{{ c.depth * 22 }}px">
+            {% if c.depth %}<span class="muted">↳</span>{% endif %}
+            <input name="name" form="{{ fid }}" value="{{ c.name }}" maxlength="120" aria-label="Name" style="flex:1;max-width:320px;{{ 'font-weight:600' if c.children }}" class="{{ 'struck' if not c.is_active }}">
+          </div>
+        </td>
+        <td><select name="parent_id" form="{{ fid }}" aria-label="Under">
+          <option value="">— Top level —</option>
+          {% for p in categories if p.id not in c.subtree_ids() %}<option value="{{ p.id }}" {{ 'selected' if c.parent_id == p.id }}>{{ cat_label(p) }}</option>{% endfor %}
+        </select></td>
+        <td class="num">{% if cat_products.get(c.id) %}<a href="{{ url_for('heads.index', tab='prices', cat=c.id) }}">{{ cat_products[c.id] }}</a>{% else %}0{% endif %}</td>
+        <td>{{ 'Active' if c.is_active else 'Inactive' }}</td>
+        <td class="acts">
+          <button class="small" form="{{ fid }}">Save</button>
+          <a class="btn small" href="{{ url_for('heads.index', tab='categories', under=c.id) }}" title="Add a category inside '{{ c.name }}'">+ Sub-category</a>
+          <form method="post" action="{{ url_for('heads.update_category', cat_id=c.id) }}" style="display:inline">
+            {{ csrf() }}{{ nextf(back) }}<input type="hidden" name="toggle" value="1">
+            <button class="small">{{ 'Deactivate' if c.is_active else 'Activate' }}</button>
+          </form>
+          {% if not cat_products.get(c.id) and not c.children %}
+          <form method="post" action="{{ url_for('heads.delete_category', cat_id=c.id) }}" style="display:inline">
+            {{ csrf() }}{{ nextf(back) }}
+            <button class="small danger-quiet" data-confirm="Remove the category '{{ c.name }}'?">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="6" class="muted" style="padding:14px">No categories yet. Add the first one above.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+{% elif tab == 'prices' %}
+  {% set back = url_for('heads.index', tab='prices') %}
+  <p class="muted" style="margin-top:0">Prices of the products we sell or buy often. Enter the price before GST and pick the GST %; the GST and the total price are worked out for you. Tick <b>Price includes GST</b> to type the total instead, and Lekka works back the price before GST. Categories come from Master data → Categories. On a new revenue item you can pick a product and its total price fills the amount.</p>
+  <datalist id="gst-rates">{% for r in gst_rates %}<option value="{{ r }}">{% endfor %}</datalist>
+  <form method="post" action="{{ url_for('heads.add_price') }}" class="js-gst price-add" id="add-price">
+    {{ csrf() }}{{ nextf(back) }}
+    <label>Product<input name="product" placeholder="e.g. PLC controller CX-200" required style="min-width:240px" {{ 'autofocus' if not prices }}></label>
+    <label>Category<select name="category_id" style="display:block;margin-top:3px;max-width:200px">
+      <option value="">— None —</option>
+      {% for c in cat_choices %}<option value="{{ c.id }}" {{ 'selected' if price_cat == c.id|string }}>{{ cat_label(c) }}</option>{% endfor %}
+    </select></label>
+    <label>Price (₹)<input name="price" inputmode="decimal" placeholder="0.00" required style="width:130px" class="num"></label>
+    <label>GST %<input name="gst_rate" list="gst-rates" value="18" inputmode="decimal" required style="width:70px" class="num"></label>
+    <label class="check" style="margin:0 0 6px"><input type="checkbox" name="includes_gst" value="1"> Price includes GST</label>
+    <div class="gst-calc" aria-live="polite">
+      <span class="muted js-base" hidden>Before GST ₹<b class="js-base-v">0</b> · </span>
+      GST ₹<b class="js-gst-v">0</b> · Total ₹<b class="js-total-v">0</b>
+    </div>
+    <button class="primary">+ Add to price list</button>
+  </form>
+  <form method="get" style="display:flex;gap:6px;align-items:center;margin:4px 0 8px;flex-wrap:wrap">
+    <input type="hidden" name="tab" value="prices">
+    <input type="search" class="js-price-search" placeholder="Search products" aria-label="Search products" style="min-width:260px">
+    <select name="cat" aria-label="Category" onchange="this.form.submit()">
+      <option value="">All categories</option>
+      <option value="none" {{ 'selected' if price_cat == 'none' }}>No category</option>
+      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if price_cat == c.id|string }}>{{ cat_label(c) }}</option>{% endfor %}
+    </select>
+  </form>
+  <table class="list price-list">
+    <thead><tr><th>Product</th><th>Category</th><th class="num">Price (before GST)</th><th class="num">GST %</th><th class="num">GST</th><th class="num">Total price</th><th></th></tr></thead>
+    <tbody>
+    {% for p in prices %}
+      {% set fid = 'p' ~ p.id %}
+      <tr class="js-gst" data-product="{{ p.product|lower }} {{ (p.category.path()|lower) if p.category else '' }}">
+        <td>
+          <form method="post" id="{{ fid }}" action="{{ url_for('heads.update_price', item_id=p.id) }}">{{ csrf() }}{{ nextf(back) }}</form>
+          <input name="product" form="{{ fid }}" value="{{ p.product }}" aria-label="Product" style="width:100%;min-width:200px">
+        </td>
+        <td><select name="category_id" form="{{ fid }}" aria-label="Category" style="max-width:190px">
+          <option value="">— None —</option>
+          {% for c in categories if c.is_active or c.id == p.category_id %}<option value="{{ c.id }}" {{ 'selected' if p.category_id == c.id }}>{{ cat_label(c) }}</option>{% endfor %}
+        </select></td>
+        <td class="num"><input name="price" form="{{ fid }}" value="{{ '%.2f'|format(p.price) }}" inputmode="decimal" aria-label="Price before GST" class="num" style="width:120px"></td>
+        <td class="num"><input name="gst_rate" form="{{ fid }}" value="{{ '{:f}'.format(p.gst_rate.normalize()) }}" list="gst-rates" inputmode="decimal" aria-label="GST %" class="num" style="width:64px"></td>
+        <td class="num">₹<span class="js-gst-v">{{ p.gst_amount|inr }}</span></td>
+        <td class="num"><b>₹<span class="js-total-v">{{ p.total|inr }}</span></b></td>
+        <td class="acts">
+          <button class="small" form="{{ fid }}">Save</button>
+          <form method="post" action="{{ url_for('heads.delete_price', item_id=p.id) }}" style="display:inline">
+            {{ csrf() }}{{ nextf(back) }}
+            <button class="small danger-quiet" data-confirm="Remove '{{ p.product }}' from the price list?">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="7" class="muted" style="padding:14px">{{ 'No products in this category.' if price_cat else 'No products yet. Add the first one above.' }}</td></tr>{% endfor %}
     </tbody>
   </table>
 {% else %}
   {% set kind = tab %}
-  {% set rows = cost_centres if tab == 'cost_centres' else counterparties %}
+  {% set rows = cost_centres %}
   <form method="post" action="{{ url_for('heads.add', kind=kind) }}" style="display:flex;gap:6px;margin-bottom:10px">
     {{ csrf() }}{{ nextf(cur) }}<input name="name" placeholder="Name" required style="min-width:260px">
     {% if tab == 'counterparties' %}

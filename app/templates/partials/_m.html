@@ -38,3 +38,14 @@
   {% if details %}<a href="#" class="btn {{ 'small' if small }}" data-dialog="{{ url_for('entries.detail', entry_id=e.id, next=nxt) }}">Details</a>{% endif %}
   {% endif %}
 {% endmacro %}
+{% macro vendor_field(vendors, direction, selected=None, name='counterparty_id', new_name='new_vendor', label=None) %}
+  <label>{{ label or 'Party' }} <span class="muted" style="font-weight:400">(optional)</span></label>
+  <select name="{{ name }}" class="full">
+    <option value="">— None —</option>
+    {% for c in vendors %}<option value="{{ c.id }}" {{ 'selected' if selected == c.id }}>{{ c.name }}{{ ' (inactive)' if not c.is_active }}</option>{% endfor %}
+  </select>
+  {% if new_name %}
+  <details style="margin-top:4px"><summary class="muted" style="cursor:pointer;font-size:12.5px">+ New party</summary>
+    <input name="{{ new_name }}" class="full" maxlength="160" placeholder="Name (also added to Master data → Parties)" style="margin-top:4px"></details>
+  {% endif %}
+{% endmacro %}

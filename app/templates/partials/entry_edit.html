@@ -1,4 +1,4 @@
-{% from "partials/_m.html" import head_title, csrf, nextf %}
+{% from "partials/_m.html" import head_title, csrf, nextf, vendor_field %}
 <div class="pop">
   {{ head_title('Edit: ' ~ e.title, e.path_titles()[:-1]|join(' › ') if e.parent_id else None) }}
   <form method="post" action="{{ url_for('entries.edit', entry_id=e.id) }}" class="js-form">
@@ -9,27 +9,59 @@
     {% else %}
       <label>Head</label>
       <select name="head_id" class="full">
-        {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if h.id == e.head_id }}>{{ h.name }}</option>{% endfor %}
+        {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if h.id == e.head_id }}>{{ head_label(h) }}</option>{% endfor %}
       </select>
       <details style="margin-top:4px"><summary class="muted" style="cursor:pointer;font-size:12.5px">+ New head</summary>
         <input name="new_head" class="full" placeholder="Name of the new head" style="margin-top:4px"></details>
       {% if not e.is_leaf %}<p class="muted" style="font-size:12.5px;margin:4px 0">Changing the head moves the whole split tree.</p>{% endif %}
     {% endif %}
     <label>Title</label><input name="title" class="full" maxlength="200" value="{{ e.title }}">
+    {% if e.parent_id %}
+      <label>Party</label><div>{{ e.counterparty.name if e.counterparty else '—' }} <span class="muted">(parts use their parent's party)</span></div>
+    {% else %}
+      {{ vendor_field(vendors, e.direction, e.counterparty_id) }}
+      {% if not e.is_leaf %}<p class="muted" style="font-size:12.5px;margin:4px 0">The party applies to every part.</p>{% endif %}
+    {% endif %}
     {% if e.is_leaf %}
       <label>Amount (₹)</label>
-      <input name="amount" class="full" value="{{ e.amount|inr }}">
+      <input name="amount" class="full" value="{{ new_amount or (e.amount|inr) }}" {{ 'autofocus' if new_amount }}>
+      {% if new_amount %}<p class="muted" style="font-size:12.5px;margin:4px 0">New amount from the grid (was ₹{{ e.amount|inr }}). Check our share below, then Save.</p>{% endif %}
       {% if e.is_settled %}<p class="muted" style="font-size:12.5px;margin:4px 0">Already {{ 'received' if e.direction == 'IN' else 'paid' }} on {{ e.settled_on.day }} {{ e.settled_on.strftime('%b %Y') }}. Changing the amount keeps it ticked on that date and corrects every balance from then.</p>{% endif %}
       <p class="muted" style="font-size:12.5px;margin:4px 0">To change the date, use Reschedule.</p>
     {% else %}
       <p class="muted">Total ₹{{ e.amount|inr }} comes from its parts; use Split to change them.</p>
     {% endif %}
+    {% if share_pct is not none %}
+    <div class="share-box" style="margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
+      <label class="check" style="margin:0">Our share
+        <input name="share_pct" class="js-share" value="{{ share_pct }}" data-total="{{ e.amount }}"
+               inputmode="decimal" style="width:70px;text-align:right"> %
+        <span class="muted" style="font-size:12.5px">{{ 'kept from before; change it if the deal changed' if shares else '100% = not shared' }}</span>
+      </label>
+      {% if shares %}
+        <p class="muted" style="font-size:12.5px;margin:6px 0 0">
+          Partner's part becomes <b class="js-share-amt">₹{{ shares|sum(attribute='amount')|inr }}</b>
+          ({% for s in shares %}'{{ s.title }}'{{ ', ' if not loop.last }}{% endfor %}, now ₹{{ shares|sum(attribute='amount')|inr }}).
+          <span class="share-none" hidden>At 100% the partner share is cancelled.</span></p>
+      {% else %}
+        <div class="share-extra" hidden>
+          <p class="muted" style="font-size:12.5px;margin:6px 0">The partner's part (<b class="js-share-amt">₹0</b>) is added as a separate expense:</p>
+          <div class="row3">
+            <div><label>Head for the partner's share</label>
+              <select name="share_head_id" class="full"><option value="">Choose a head…</option>
+                {% for h in share_heads %}<option value="{{ h.id }}">{{ head_label(h) }}</option>{% endfor %}</select></div>
+            <div><label>Title</label><input name="share_title" class="full" placeholder="Partner share – {{ e.title }}"></div>
+            <div><label>Date it goes out</label><input type="date" name="share_date" class="full"
+                 value="{{ (e.planned_date or e.date_range()[0] or today()).isoformat() }}"></div>
+          </div>
+          <div style="max-width:50%">{{ vendor_field(share_vendors, 'OUT', name='share_counterparty_id', new_name=None, label="Partner (party)") }}</div>
+        </div>
+      {% endif %}
+    </div>
+    {% endif %}
     <label>Remarks</label><textarea name="remarks" maxlength="1000">{{ e.remarks or '' }}</textarea>
-    <div class="{{ 'row3' if show_cc else '' }}">
+    <div class="{{ 'row2' if show_cc else '' }}">
       {% if show_cc %}
-      <div><label>Counterparty</label>
-        <select name="counterparty_id" class="full"><option value="">—</option>
-          {% for c in counterparties %}<option value="{{ c.id }}" {{ 'selected' if c.id == e.counterparty_id }}>{{ c.name }}</option>{% endfor %}</select></div>
       <div><label>Cost centre</label>
         <select name="cost_centre_id" class="full"><option value="">—</option>
           {% for c in cost_centres %}<option value="{{ c.id }}" {{ 'selected' if c.id == e.cost_centre_id }}>{{ c.name }}</option>{% endfor %}</select></div>

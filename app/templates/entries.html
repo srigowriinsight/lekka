@@ -16,6 +16,7 @@
       {% if e.template_id and not e.parent_id %}<span class="muted">(recurring)</span>{% endif %}
       {% if e.reschedule_count %}<span class="badge-move" title="Moved {{ e.reschedule_count }} time(s)">↻{{ e.reschedule_count }}</span>{% endif %}
       {% if e.reference_no and level == 0 %}<span class="muted" style="font-size:12px"> · {{ e.reference_no }}</span>{% endif %}
+      {% if e.counterparty and level == 0 %}<div class="muted" style="font-size:12px">{{ e.counterparty.name }}</div>{% endif %}
     </td>
     <td class="num {{ 'struck' if e.is_cancelled }}">{{ e.amount|inr }}</td>
     <td style="white-space:nowrap">
@@ -31,7 +32,7 @@
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
   <h1 style="margin:0">{{ 'Revenue' if is_in else 'Expense' }}</h1>
   <div style="display:flex;gap:8px">
-    <a class="btn" href="#" data-dialog="{{ url_for('heads.new_head_form', next=cur) }}">+ Add head</a>
+    <a class="btn" href="#" data-dialog="{{ url_for('heads.new_head_form', next=cur, **{'for': direction}) }}">+ Add head</a>
     <a class="btn primary" href="#" data-dialog="{{ url_for('entries.new_form', direction=direction, next=cur) }}">+ New {{ noun }}</a>
   </div>
 </div>
@@ -45,16 +46,20 @@
 <form class="filters" method="get">
   <div class="chips">
     {% for f, l in [('all','All'),('pending','Pending'),('overdue','Overdue'),('settled','Received' if is_in else 'Settled'),('cancelled','Cancelled')] %}
-      <a href="{{ url_for(request.endpoint, status=f, start=a.isoformat(), end=b.isoformat(), q=q, head=head_id or '') }}" class="{{ 'on' if status_filter == f }}">{{ l }}</a>
+      <a href="{{ url_for(request.endpoint, status=f, start=a.isoformat(), end=b.isoformat(), q=q, head=head_id or '', vendor=vendor) }}" class="{{ 'on' if status_filter == f }}">{{ l }}</a>
     {% endfor %}
   </div>
   <input type="hidden" name="status" value="{{ status_filter }}">
   <input type="date" name="start" value="{{ a.isoformat() }}" aria-label="From"> <span class="muted">to</span>
   <input type="date" name="end" value="{{ b.isoformat() }}" aria-label="To">
   <select name="head" aria-label="Head"><option value="">All heads</option>
-    {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if head_id|string == h.id|string }}>{{ h.name }}</option>{% endfor %}</select>
+    {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if head_id|string == h.id|string }}>{{ head_label(h) }}</option>{% endfor %}</select>
+  <select name="vendor" aria-label="Party"><option value="">All parties</option>
+    <option value="none" {{ 'selected' if vendor == 'none' }}>No party</option>
+    {% for c in all_vendors %}<option value="{{ c.id }}" {{ 'selected' if vendor == c.id|string }}>{{ c.name }}</option>{% endfor %}</select>
   <input name="q" value="{{ q }}" placeholder="Search title, remarks, PO / invoice no." style="min-width:260px">
   <button class="small">Show</button>
+  {% if head_id or vendor or q or request.args.get('start') %}<a class="btn small" href="{{ url_for(request.endpoint) }}">Clear filters</a>{% endif %}
   {% if status_filter == 'overdue' %}<span class="muted">Showing every overdue item, whatever its date.</span>{% endif %}
 </form>
 
@@ -64,7 +69,7 @@
   {% for head, roots in groups %}
     {% set live = roots|rejectattr('is_cancelled')|list %}
     <tr class="group">
-      <td></td><td>{{ head.name }}</td>
+      <td></td><td>{{ head.path() }}</td>
       <td class="num">{{ live|sum(attribute='amount')|inr }}</td>
       <td colspan="3" class="muted" style="font-weight:400">{{ roots|length }} item(s)</td>
       <td class="acts"><a href="#" data-dialog="{{ url_for('entries.new_form', direction=direction, head_id=head.id, next=cur) }}">+ Add {{ noun }}</a></td>

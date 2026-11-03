@@ -9,8 +9,8 @@
     <div class="row2">
       <div><label>Title</label><input name="title" class="full" value="{{ t.title if t else '' }}" placeholder="e.g. Factory rent"></div>
       <div><label>Head</label>
-        <select name="head_id" class="full"><option value="">Choose a head…</option>
-          {% for h in heads %}<option value="{{ h.id }}" {{ 'selected' if t and t.head_id == h.id }}>{{ h.name }}</option>{% endfor %}</select></div>
+        <select name="head_id" class="full js-heads-by-direction"><option value="">Choose a head…</option>
+          {% for h in heads %}<option value="{{ h.id }}" data-kind="{{ h.kind }}" {{ 'selected' if t and t.head_id == h.id }}>{{ head_label(h) }}</option>{% endfor %}</select></div>
     </div>
     <div class="row2">
       <div><label>Inflow or outflow</label>
