@@ -9,7 +9,7 @@ from ..models import (ACTIVE, CANCELLED, DELETED, IN, OUT, Account, BalanceAdjus
 from .common import LekkaError, audit, inr, money, parse_date, snapshot, today, user_id
 
 ENTRY_FIELDS = ["title", "amount", "planned_date", "is_settled", "settled_on", "lifecycle",
-                "head_id", "direction", "remarks", "cancel_reason", "reschedule_count", "counterparty_id"]
+                "head_id", "direction", "remarks", "cancel_reason", "reschedule_count", "counterparty_id", "category_id"]
 PAISA = Decimal("0.01")
 MAX_REMARKS = 1000
 
@@ -207,7 +207,8 @@ def _recompute_ancestors(node):
 
 def create_entry(*, direction, head_id, title, amount, planned_date, remarks=None,
                  cost_centre_id=None, counterparty_id=None, reference_no=None,
-                 settled_on=None, template_id=None, occurrence_date=None, audit_action="create"):
+                 settled_on=None, template_id=None, occurrence_date=None, audit_action="create",
+                 category_id=None):
     if direction not in (IN, OUT):
         raise LekkaError("Choose inflow or outflow.")
     head = _check_head(head_id, direction=direction)
@@ -215,6 +216,7 @@ def create_entry(*, direction, head_id, title, amount, planned_date, remarks=Non
         direction=direction, head_id=head.id, title=_check_title(title), amount=_check_amount(amount),
         planned_date=parse_date(planned_date, "planned date"), remarks=_check_remarks(remarks),
         cost_centre_id=cost_centre_id or None, counterparty_id=counterparty_id or None,
+        category_id=_check_category(category_id),
         reference_no=(reference_no or "").strip() or None,
         template_id=template_id, occurrence_date=occurrence_date,
         created_by=user_id(), updated_by=user_id(),
@@ -229,9 +231,18 @@ def create_entry(*, direction, head_id, title, amount, planned_date, remarks=Non
     return e
 
 
+def _check_category(category_id):
+    if category_id in (None, ""):
+        return None
+    from ..models import Category
+    if db.session.get(Category, int(category_id)) is None:
+        raise LekkaError("That category no longer exists. Reload and choose again.")
+    return int(category_id)
+
+
 def edit_entry(e: CashflowEntry, *, title=None, amount=None, remarks=None, head_id=None,
                counterparty_id=None, cost_centre_id=None, reference_no=None,
-               expected_version=None, remarks_note=None, follow_shares=True):
+               expected_version=None, remarks_note=None, follow_shares=True, category_id=None):
     """counterparty_id: None = leave as is, "" = clear (no vendor), an id = set. Set on a top item, it applies
     to all its parts. follow_shares: an amount change inside a shared revenue keeps its partner share at the
     same % (the Edit popup of the revenue itself passes False and asks the % again instead)."""
@@ -250,6 +261,10 @@ def edit_entry(e: CashflowEntry, *, title=None, amount=None, remarks=None, head_
             raise LekkaError("That party no longer exists. Reload and choose again.")
         for node in [e] + (e.descendants() if e.parent_id is None else []):
             node.counterparty_id = cp
+    if category_id is not None:            # None = leave, "" = clear; on a top item it applies to all parts
+        cat = _check_category(category_id)
+        for node in [e] + (e.descendants() if e.parent_id is None else []):
+            node.category_id = cat
     if cost_centre_id is not None:
         e.cost_centre_id = cost_centre_id or None
     if amount is not None:
@@ -348,7 +363,7 @@ def _child(parent, p, settled_on=None):
         parent=parent, root_id=parent.root_id, depth=parent.depth + 1,
         direction=parent.direction, head_id=parent.head_id,
         cost_centre_id=parent.cost_centre_id, counterparty_id=parent.counterparty_id,
-        title=p["title"], amount=p["amount"], planned_date=p["planned_date"],
+        category_id=parent.category_id, title=p["title"], amount=p["amount"], planned_date=p["planned_date"],
         remarks=p.get("remarks"), created_by=user_id(), updated_by=user_id(),
     )
     if settled_on:

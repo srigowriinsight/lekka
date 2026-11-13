@@ -1,4 +1,4 @@
-{% from "partials/_m.html" import head_title, csrf, nextf, vendor_field %}
+{% from "partials/_m.html" import head_title, csrf, nextf, vendor_field, category_field %}
 <div class="pop">
   {{ head_title('New ' ~ ('revenue' if direction == 'IN' else 'expense'), 'Inflow: money coming in' if direction == 'IN' else 'Outflow: money going out') }}
   <form method="post" action="{{ url_for('entries.create') }}" class="js-form">
@@ -28,7 +28,7 @@
       {% for p in products %}
         {% set cat = p.category.path() if p.category else 'No category' %}
         {% if cat != ns.cat %}{% if ns.cat is not none %}</optgroup>{% endif %}<optgroup label="{{ cat }}">{% set ns.cat = cat %}{% endif %}
-        <option value="{{ p.id }}" data-total="{{ p.total }}" data-name="{{ p.product }}">{{ p.product }} · ₹{{ p.total|inr }} incl. {{ '{:f}'.format(p.gst_rate.normalize()) }}% GST</option>
+        <option value="{{ p.id }}" data-total="{{ p.total }}" data-name="{{ p.product }}" data-category="{{ p.category_id or '' }}">{{ p.product }} · ₹{{ p.total|inr }} incl. {{ '{:f}'.format(p.gst_rate.normalize()) }}% GST</option>
       {% endfor %}
       {% if ns.cat is not none %}</optgroup>{% endif %}
     </select></div>
@@ -38,7 +38,7 @@
     {% endif %}
     <label>Title</label>
     <input name="title" class="full" maxlength="200" placeholder="e.g. PO-V-221 components">
-    {{ vendor_field(vendors, direction) }}
+    <div class="row2"><div>{{ vendor_field(vendors, direction) }}</div><div>{{ category_field(categories, cat_label) }}</div></div>
     <div class="row2">
       <div><label>Amount (₹)</label><input name="amount" class="full" inputmode="decimal" placeholder="1,00,000"></div>
       <div><label>Planned date</label><input type="date" name="planned_date" class="full" value="{{ date }}"

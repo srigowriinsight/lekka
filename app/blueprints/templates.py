@@ -5,6 +5,7 @@ from flask_login import login_required
 from ..extensions import db
 from ..models import Head, RecurringTemplate
 from ..services import recurrence as rec
+from ..services import vendors
 from ..services.heads import tree_order
 from ..services.common import LekkaError, today
 from ._util import done, fragment, handles_errors, safe_next
@@ -12,18 +13,26 @@ from ._util import done, fragment, handles_errors, safe_next
 bp = Blueprint("templates", __name__, url_prefix="/templates")
 
 
-def _form_data(f):
+# Settings no longer on the form (day of the month/week, stop after N times, create dates up to, split
+# pattern). A new template leaves them empty: dates fall on the first date's day, 12 months ahead, unsplit.
+# An existing template keeps whatever it already had, also after an edit.
+HIDDEN = ("anchor_day", "max_occurrences", "horizon_until", "split_pattern")
+
+
+def _form_data(f, tpl=None):
     data = {k: f.get(k) for k in ("title", "head_id", "direction", "amount", "freq", "interval_n",
-                                  "anchor_day", "start_date", "end_date", "max_occurrences",
-                                  "horizon_until", "remarks")}
-    if f.get("freq") == "WEEKLY" and f.get("weekday") not in (None, ""):
-        data["anchor_day"] = f.get("weekday")
-    pcts = [p for p in f.getlist("pattern_pct") if p.strip()]
-    if pcts:
-        offs = f.getlist("pattern_offset")
-        data["split_pattern"] = [{"pct": float(p) if "." in p else int(p),
-                                  "offset_months": int(offs[i] or 0) if i < len(offs) else 0}
-                                 for i, p in enumerate(pcts)]
+                                  "start_date", "end_date", "remarks")}
+    for k in HIDDEN:
+        v = getattr(tpl, k, None) if tpl is not None else None
+        if k in ("max_occurrences", "anchor_day") and v is not None:
+            v = str(v)
+        elif k == "horizon_until" and v is not None:
+            v = v.isoformat()
+        data[k] = v
+    if tpl is not None and f.get("freq") != tpl.freq:
+        data["anchor_day"] = None          # a day of the week means nothing monthly, and the other way round
+    cp = vendors.from_form(f, f.get("direction"))          # optional party, or one typed into '+ New party'
+    data["counterparty_id"] = cp if cp not in (None, "") else None
     return data
 
 
@@ -45,7 +54,8 @@ def index():
 def new():
     heads = tree_order(Head.query.filter_by(is_active=True).all())
     if request.method == "GET":
-        return fragment("partials/template_form.html", tpl=None, heads=heads, next=safe_next())
+        return fragment("partials/template_form.html", tpl=None, heads=heads, parties=vendors.for_direction(),
+                        next=safe_next())
     tpl = rec.create_template(_form_data(request.form))
     n = len(rec.occurrences(tpl))
     return done(f"Template '{tpl.title}' saved; {n} dated item(s) created.")
@@ -60,10 +70,10 @@ def edit(tpl_id):
         raise LekkaError("Template not found.")
     heads = tree_order()
     if request.method == "GET":
-        upcoming = [r for r in rec.occurrences(tpl) if r.occurrence_date >= today()][:6]
-        return fragment("partials/template_form.html", tpl=tpl, heads=heads, upcoming=upcoming, next=safe_next())
+        return fragment("partials/template_form.html", tpl=tpl, heads=heads, next_due=_next_date(tpl),
+                        parties=vendors.for_direction(keep_id=tpl.counterparty_id), next=safe_next())
     f = request.form
-    result, kept = rec.update_template(tpl, _form_data(f), f.get("scope"), f.get("from_date"))
+    result, kept = rec.update_template_from(tpl, _form_data(f, tpl), f.get("from_date"))
     msg = "Template updated."
     if kept:
         msg += f" {len(kept)} handled item(s) were kept as they were: " + ", ".join(

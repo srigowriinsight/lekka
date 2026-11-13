@@ -109,6 +109,8 @@
     if (title && (!title.value.trim() || title.dataset.auto === "1")) {
       title.value = o.dataset.name; title.dataset.auto = "1"; title.dispatchEvent(new Event("input", { bubbles: true }));
     }
+    const cat = f.querySelector(".js-category");
+    if (cat && o.dataset.category && !cat.dataset.touched) cat.value = o.dataset.category;
     const line = `${fmt(qty)} × ${o.dataset.name} @ ₹${fmt(price)} incl. GST`;
     if (rem && (!rem.value.trim() || rem.dataset.auto === "1")) { rem.value = line; rem.dataset.auto = "1"; }
     if (note) { note.hidden = false; note.textContent = `Amount = ₹${fmt(price)} × ${fmt(qty)} = ₹${fmt(amount)} (price incl. GST × qty). You can still change it.`; }
@@ -119,6 +121,7 @@
   document.addEventListener("input", (ev) => {
     if (!ev.target.matches) return;
     if (ev.target.matches(".js-qty")) productFill(ev.target.form);
+    if (ev.target.matches(".js-category") && ev.isTrusted) ev.target.dataset.touched = "1";
     // typed by hand: stop replacing it
     if (ev.isTrusted && (ev.target.name === "title" || ev.target.name === "remarks")) delete ev.target.dataset.auto;
   });
@@ -236,6 +239,8 @@
       if (!open && r.dataset.key) toggleHead(r.dataset.key, false);
     });
     if (btn) btn.textContent = open ? "▾" : "▸";
+    const head = document.querySelector(`tr.head-row[data-key="${key}"]`);
+    if (head) head.classList.toggle("open", !!open);   // an open head hides amounts its single line already shows
   }
   // "Custom": switch the range form to day columns and open the From date.
   window.lekkaCustom = function (link) {
@@ -253,6 +258,73 @@
     // parents come first in the page, so opening in page order opens every level
     document.querySelectorAll("[data-toggle]").forEach((b) => toggleHead(b.dataset.toggle, show));
   };
+
+  // ------------------------------------------------ grid: Inflow / Outflow totals shown on a click of the grey band
+  function showTotals(dir, show) {
+    document.querySelectorAll(`tr[data-total="${dir}"]`).forEach((r) => (r.hidden = !show));
+    const band = document.querySelector(`tr.js-band[data-section="${dir}"] .band-caret`);
+    if (band) band.textContent = show ? "▾" : "▸";
+    try { localStorage.setItem(`lekka.totals.${dir}`, show ? "1" : "0"); } catch (e) { /* storage off: fine */ }
+  }
+  document.addEventListener("click", (ev) => {
+    const band = ev.target.closest && ev.target.closest("tr.js-band");
+    if (!band) return;
+    const row = document.querySelector(`tr[data-total="${band.dataset.section}"]`);
+    showTotals(band.dataset.section, row ? row.hidden : false);
+  });
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll("tr.js-band").forEach((b) => {
+      let on = false;
+      try { on = localStorage.getItem(`lekka.totals.${b.dataset.section}`) === "1"; } catch (e) { /* ignore */ }
+      if (on) showTotals(b.dataset.section, true);
+    });
+  });
+
+  // ------------------------------------------------ Review page: filters apply as soon as they change
+  document.addEventListener("change", (ev) => {
+    const t = ev.target;
+    if (!t.closest || !t.closest("#rv-form")) return;
+    const form = t.closest("#rv-form");
+    if (t.matches(".js-rv-date")) {                    // own dates: no quick range any more
+      form.querySelector(".js-rv-preset").value = "";
+      form.querySelectorAll(".seg button.on").forEach((b) => b.classList.remove("on"));
+    }
+    if (t.matches(".js-rv-seg")) {                     // show the choice at once; Apply filters runs it
+      t.closest(".seg").querySelectorAll("label").forEach((l) => l.classList.toggle("on", l.contains(t)));
+    }
+  });
+  document.addEventListener("input", (ev) => {           // find inside a Party / Head / Category list
+    if (!ev.target.matches || !ev.target.matches(".dd-find")) return;
+    const q = ev.target.value.trim().toLowerCase();
+    ev.target.closest(".dd-box").querySelectorAll(".opt").forEach((o) => (o.hidden = !!q && !o.textContent.toLowerCase().includes(q)));
+  });
+  document.addEventListener("click", (ev) => {           // one list open at a time; a click outside closes it
+    document.querySelectorAll("details.dd[open]").forEach((d) => { if (!d.contains(ev.target)) d.open = false; });
+  });
+
+  // ------------------------------------------------ grid: small hover box with title, head and party
+  let tipBox = null;
+  function hideTip() { if (tipBox) tipBox.hidden = true; }
+  document.addEventListener("mouseover", (ev) => {
+    const td = ev.target.closest && ev.target.closest("[data-tip]");
+    if (!td || !td.dataset.tip.trim()) { hideTip(); return; }
+    if (!tipBox) {
+      tipBox = document.createElement("div");
+      tipBox.className = "lekka-tip";
+      tipBox.setAttribute("role", "tooltip");
+      document.body.appendChild(tipBox);
+    }
+    tipBox.textContent = td.dataset.tip.trim();
+    tipBox.hidden = false;
+    const r = td.getBoundingClientRect(), w = tipBox.offsetWidth, h = tipBox.offsetHeight;
+    let x = r.left, y = r.bottom + 6;
+    if (x + w > window.innerWidth - 8) x = Math.max(8, r.right - w);
+    if (y + h > window.innerHeight - 8) y = Math.max(8, r.top - h - 6);
+    tipBox.style.left = `${x}px`;
+    tipBox.style.top = `${y}px`;
+  });
+  document.addEventListener("scroll", hideTip, true);
+  document.addEventListener("mousedown", hideTip);
 
   // ------------------------------------------------ list pages: select many
   document.addEventListener("change", (ev) => {

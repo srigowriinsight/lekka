@@ -5,7 +5,7 @@ from .common import LekkaError, audit
 
 
 def _key(c):
-    return (c.sort_order, c.name.lower())
+    return c.name.lower()            # A–Z at every level
 
 
 def tree_order(only=None):

@@ -97,3 +97,14 @@ def test_product_picker_on_new_revenue(client):
     assert 'class="full js-product"' in in_form and 'data-total="11800.00"' in in_form
     assert '<optgroup label="Controllers">' in in_form and "js-qty" in in_form
     assert "js-product" not in client.get("/entries/new?direction=OUT", headers=F).get_data(as_text=True)
+
+
+def test_sub_category_popup(client):
+    ok(client.post("/master/categories/add", data={"name": "Controllers"}, headers=F))
+    top = Category.query.one()
+    pop = client.get(f"/master/categories/new?under={top.id}", headers=F).get_data(as_text=True)
+    assert "Add sub-category under Controllers" in pop and f'value="{top.id}" selected' in pop
+    page = client.get("/master/?tab=categories").get_data(as_text=True)
+    assert f"/master/categories/new?under={top.id}" in page
+    ok(client.post("/master/categories/add", data={"name": "PLC", "parent_id": top.id}, headers=F))
+    assert Category.query.filter_by(name="PLC").one().parent_id == top.id

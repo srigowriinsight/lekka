@@ -1,52 +1,105 @@
 {% extends "base.html" %}
-{% from "partials/_m.html" import pill, dm, dmy, csrf, nextf %}
-{% block title %}End-of-day review{% endblock %}
+{% from "partials/_m.html" import pill, dm, csrf, nextf %}
+{% block title %}Review{% endblock %}
 {% block content %}
 {% set cur = request.full_path %}
-<h1>End-of-day review</h1>
-<p class="muted" style="margin-top:-6px">Optional. Items that are not ticked are not counted anywhere until they are ticked or given a new date.
-  For each one: tick it if the money moved, reschedule it if a new date is agreed, or leave it as it is.</p>
+{% macro check_list(name, items, selected, extra=None) %}
+  {% for v, l in (extra or []) %}<label class="opt"><input type="checkbox" name="{{ name }}" value="{{ v }}" {{ 'checked' if v in selected }}> <i>{{ l }}</i></label>{% endfor %}
+  {% for x in items %}<label class="opt" style="padding-left:{{ 8 + (x.depth or 0) * 16 }}px"><input type="checkbox" name="{{ name }}" value="{{ x.id }}" {{ 'checked' if x.id|string in selected }}> {{ x.name }}</label>{% endfor %}
+{% endmacro %}
 
-<h2>Overdue ({{ overdue|length }})</h2>
-{% macro table(items) %}
-<table class="list">
-  <thead><tr><th></th><th>Head</th><th>Title</th><th class="num">Amount (₹)</th><th>Planned</th><th>Status</th><th></th></tr></thead>
+<div class="rv-head">
+  <h1>Review</h1>
+  <a class="btn small" href="{{ url(endpoint='grid.review_export') }}">⤓ Excel</a>
+</div>
+
+<form method="get" class="rv-filters" id="rv-form">
+  <input type="hidden" name="preset" value="{{ p.preset }}" class="js-rv-preset">
+  <div class="rv-line">
+    <div class="seg">
+      {% for k, l in presets %}<button type="submit" name="preset_btn" value="{{ k }}" class="{{ 'on' if p.preset == k }}">{{ l }}</button>{% endfor %}
+    </div>
+    <div class="rv-dates">
+      <input type="date" name="start" value="{{ p.start.isoformat() }}" aria-label="From" class="js-rv-date">
+      <span class="muted">to</span>
+      <input type="date" name="end" value="{{ p.end.isoformat() }}" aria-label="To" class="js-rv-date">
+    </div>
+  </div>
+  <div class="rv-line">
+    <div class="seg" role="radiogroup" aria-label="Type">
+      {% for k, l in types %}<label class="{{ 'on' if p.type == k }}"><input type="radio" name="type" value="{{ k }}" {{ 'checked' if p.type == k }} class="js-rv-seg"> {{ l }}</label>{% endfor %}
+    </div>
+    <div class="seg" role="radiogroup" aria-label="Status">
+      {% for k, l in statuses %}<label class="{{ 'on' if p.status == k }}"><input type="radio" name="status" value="{{ k }}" {{ 'checked' if p.status == k }} class="js-rv-seg"> {{ l }}</label>{% endfor %}
+    </div>
+    <details class="dd">
+      <summary>Party{% if p.parties %} <b>· {{ p.parties|length }}</b>{% endif %}</summary>
+      <div class="dd-box">
+        <input type="search" class="dd-find" placeholder="Find" aria-label="Find a party">
+        <div class="dd-list">{{ check_list('party', ch.parties, p.parties, [('none', 'No party')]) }}</div>
+      </div>
+    </details>
+    <details class="dd">
+      <summary>Head{% if p.heads %} <b>· {{ p.heads|length }}</b>{% endif %}</summary>
+      <div class="dd-box">
+        <input type="search" class="dd-find" placeholder="Find" aria-label="Find a head">
+        <div class="dd-list">{{ check_list('head', ch.heads, p.heads) }}</div>
+      </div>
+    </details>
+    <details class="dd">
+      <summary>Category{% if p.cats %} <b>· {{ p.cats|length }}</b>{% endif %}</summary>
+      <div class="dd-box">
+        <input type="search" class="dd-find" placeholder="Find" aria-label="Find a category">
+        <div class="dd-list">{{ check_list('cat', ch.cats, p.cats, [('none', 'No category')]) }}</div>
+      </div>
+    </details>
+    <select name="group" aria-label="Group by">
+      {% for k, l in groups %}<option value="{{ k }}" {{ 'selected' if p.group == k }}>{{ 'Group by: ' ~ l if k else l }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="primary">Apply filters</button>
+  </div>
+  {% if applied or p.type != 'all' or p.status != 'all' or p.group %}
+  <div class="rv-applied">
+    {% for label, link in applied %}<a class="chip" href="{{ link }}">{{ label }} <span aria-label="remove">✕</span></a>{% endfor %}
+    <a class="muted" href="{{ url_for('grid.review', preset=p.preset or None, start=None if p.preset else p.start.isoformat(), end=None if p.preset else p.end.isoformat()) }}">Clear filters</a>
+  </div>
+  {% endif %}
+</form>
+
+<div class="rv-tiles">
+  <div class="tile in"><span>Money in</span><b>₹{{ res.money_in|inr }}</b></div>
+  <div class="tile out"><span>Money out</span><b>₹{{ res.money_out|inr }}</b></div>
+  <div class="tile {{ 'in' if res.net >= 0 else 'out' }}"><span>Net</span><b>{{ '' if res.net >= 0 else '−' }}₹{{ (res.net if res.net >= 0 else -res.net)|inr }}</b></div>
+  <a class="tile" href="{{ url(status='unpaid') }}"><span>Unpaid</span><b>₹{{ res.unpaid_amount|inr }}</b><small>{{ res.unpaid_count }} item{{ 's' if res.unpaid_count != 1 }}</small></a>
+  <a class="tile {{ 'bad' if res.overdue_count }}" href="{{ url(status='overdue') }}"><span>Overdue</span><b>{{ res.overdue_count }}</b><small>item{{ 's' if res.overdue_count != 1 }}</small></a>
+</div>
+
+{% macro row(e) %}
+  <tr>
+    <td class="rv-date">{{ dm(when(e)) }} <span class="muted">{{ when(e).strftime('%y') }}</span></td>
+    <td><a href="#" class="rv-title" data-dialog="{{ url_for('entries.detail', entry_id=e.id, next=cur) }}">{{ e.path_titles()|join(' › ') }}</a></td>
+    <td>{{ e.counterparty.name if e.counterparty else '' }}</td>
+    <td class="muted">{{ e.head.path() if e.head else '' }}</td>
+    <td class="muted">{{ e.category.path() if e.category else '' }}</td>
+    <td class="num {{ 'amt-in' if e.direction == 'IN' else 'amt-out' }}">{{ '+' if e.direction == 'IN' else '−' }}₹{{ e.amount|inr }}</td>
+    <td>{{ pill(e) }}</td>
+  </tr>
+{% endmacro %}
+
+<table class="list rv-table">
+  <thead><tr><th>Date</th><th>Title</th><th>Party</th><th>Head</th><th>Category</th><th class="num">Amount</th><th>Status</th></tr></thead>
   <tbody>
-  {% for e in items %}
-    <tr>
-      <td style="width:26px"><input type="checkbox" class="pick" value="{{ e.id }}" aria-label="Select"></td>
-      <td>{{ e.head.name }}</td>
-      <td>{{ e.path_titles()|join(' › ') }} <span class="muted">{{ '· In' if e.direction == 'IN' else '· Out' }}</span>
-        {% if e.reschedule_count %}<span class="badge-move">↻{{ e.reschedule_count }}</span>{% endif %}</td>
-      <td class="num">{{ e.amount|inr }}</td>
-      <td>{{ dm(e.planned_date) }}</td>
-      <td>{{ pill(e) }}</td>
-      <td class="acts">
-        {% if e.planned_date < opening_date %}
-        <span class="muted" style="font-size:12.5px;margin-right:6px" title="Lekka only counts money from the account's opening date">Before the opening date ({{ dm(opening_date) }}): not counted. Reschedule it, or move the opening date earlier on the Account page.</span>
-        {% else %}
-        <a href="#" class="btn small" data-dialog="{{ url_for('entries.settle', entry_id=e.id, next=cur) }}">Tick</a>
-        {% endif %}
-        <a href="#" class="btn small" data-dialog="{{ url_for('entries.reschedule', entry_id=e.id, next=cur) }}">Reschedule</a>
-        <span class="muted" style="margin-left:6px">or leave</span>
-      </td>
-    </tr>
-  {% else %}<tr><td colspan="7" class="muted" style="padding:14px">Nothing here.</td></tr>{% endfor %}
+  {% if res.groups %}
+    {% for g in res.groups %}
+      <tr class="rv-group"><td colspan="5">{{ g.label }} <span class="muted">· {{ g.rows|length }}</span></td>
+        <td class="num">{% if g.money_in %}<span class="amt-in">+₹{{ g.money_in|inr }}</span>{% endif %}{% if g.money_in and g.money_out %}<br>{% endif %}{% if g.money_out %}<span class="amt-out">−₹{{ g.money_out|inr }}</span>{% endif %}</td><td></td></tr>
+      {% for e in g.rows %}{{ row(e) }}{% endfor %}
+    {% endfor %}
+  {% else %}
+    {% for e in res.rows %}{{ row(e) }}{% endfor %}
+  {% endif %}
+  {% if not res.rows %}<tr><td colspan="7" class="muted" style="padding:18px;text-align:center">Nothing matches these filters.</td></tr>{% endif %}
   </tbody>
 </table>
-{% endmacro %}
-{{ table(overdue) }}
-<h2>Due today, not ticked yet ({{ due_today|length }})</h2>
-{{ table(due_today) }}
 
-<div class="bulkbar">
-  <b><span class="n">0</span> selected</b>
-  <form method="post" action="{{ url_for('entries.settle_many') }}" onsubmit="return lekkaBulk(this)">
-    {{ csrf() }}{{ nextf(cur) }}<input type="hidden" name="when" value="today"><button class="primary small">Tick today</button>
-  </form>
-  <form method="post" action="{{ url_for('entries.reschedule_many') }}" onsubmit="return lekkaBulk(this)" style="display:flex;gap:6px">
-    {{ csrf() }}{{ nextf(cur) }}<input type="date" name="new_date" min="{{ today().isoformat() }}" required aria-label="New date">
-    <button class="small">Reschedule all to this date</button>
-  </form>
-</div>
 {% endblock %}

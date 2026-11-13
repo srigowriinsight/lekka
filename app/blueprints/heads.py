@@ -117,6 +117,15 @@ def _category(cat_id):
     return c
 
 
+@bp.route("/categories/new")
+@login_required
+def new_category_form():
+    """Popup to add a category, here inside another one (+ Sub-category)."""
+    parent = db.session.get(Category, int(request.args["under"])) if request.args.get("under", "").isdigit() else None
+    return fragment("partials/category_new.html", parent=parent, categories=cat_svc.tree_order(),
+                    cat_label=cat_svc.label, next=safe_next())
+
+
 @bp.route("/categories/add", methods=["POST"])
 @login_required
 @handles_errors

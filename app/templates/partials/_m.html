@@ -49,3 +49,11 @@
     <input name="{{ new_name }}" class="full" maxlength="160" placeholder="Name (also added to Master data → Parties)" style="margin-top:4px"></details>
   {% endif %}
 {% endmacro %}
+
+{% macro category_field(categories, cat_label, selected=None) %}
+  <label>Category <span class="muted" style="font-weight:400">(optional)</span></label>
+  <select name="category_id" class="full js-category">
+    <option value="">— None —</option>
+    {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if selected == c.id }}>{{ cat_label(c) }}{{ ' (inactive)' if not c.is_active }}</option>{% endfor %}
+  </select>
+{% endmacro %}

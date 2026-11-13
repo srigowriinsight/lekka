@@ -8,7 +8,7 @@ KIND_LABEL = dict(KINDS)
 
 
 def _key(h):
-    return (h.sort_order, h.name.lower())
+    return h.name.lower()            # A–Z at every level
 
 
 def tree_order(heads=None):

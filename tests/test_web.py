@@ -198,7 +198,7 @@ def test_quick_amount_edit_from_grid(demo_client):
                                    CashflowEntry.planned_date > date(2026, 11, 25)).first()
     e = e.leaves()[0]
     html = demo_client.get("/").get_data(as_text=True)
-    assert "data-edit=" in html and "Double-click to change the amount" in html
+    assert "data-edit=" in html
     r = demo_client.post(f"/entries/{e.id}/amount", data={"amount": "1,23,456", "version": e.version}, headers=F)
     assert r.get_json().get("redirect")
     assert by_title(e.title).amount == Decimal("123456")
@@ -332,7 +332,7 @@ def test_correct_amount_of_ticked_item(demo_client):
     paid_on, old_amount = e.settled_on, e.amount
     before = closing_on(paid_on)
     html = demo_client.get(f"/?freq=day&start={paid_on}&end={paid_on}").get_data(as_text=True)
-    assert "(it stays ticked)" in html
+    assert f'/entries/{e.id}/amount' in html                  # the ticked figure can be double-clicked
     r = demo_client.post(f"/entries/{e.id}/amount", data={"amount": str(old_amount + 1000), "version": e.version},
                          headers=F)
     assert r.get_json().get("redirect")
@@ -566,3 +566,92 @@ def test_cancelling_shared_revenue_cancels_or_shrinks_partner_share(demo_client)
     demo_client.post(f"/entries/{rev.id}/cancel", data={"reason": "Lost"}, headers=F)
     assert by_title("Share C").is_settled and by_title("Share C").lifecycle == "ACTIVE"
     assert "already ticked as paid" in demo_client.get("/").get_data(as_text=True)
+
+
+def test_recurring_template_is_one_line_in_expanded_grid(demo_client):
+    head = Head.query.filter_by(name="Factory rent").first()
+    demo_client.post("/templates/new", headers=F, data={
+        "title": "House keeping", "head_id": head.id, "direction": "OUT", "amount": "2,000",
+        "freq": "MONTHLY", "interval_n": "1", "anchor_day": "10", "start_date": "2026-12-10"})
+    page = demo_client.get("/?freq=month&start=2026-12-01&end=2027-04-30&expand=1").get_data(as_text=True)
+    lines = [ln for ln in page.split("<tr") if "item-row" in ln and "House keeping" in ln]
+    assert len(lines) == 1, len(lines)                       # one line, not one per month
+    assert lines[0].count(">2,000<") == 5 and "↻" in lines[0]
+    # its title opens the template's dates in this view
+    import re
+    url = re.search(r'data-dialog="([^"]*entries=[^"]+)"', lines[0]).group(1).replace("&amp;", "&")
+    pop = demo_client.get(url, headers=F).get_data(as_text=True)
+    assert pop.count("House keeping") >= 5
+    # a weekly template in a month view: dates in one column are added up, marked ×n
+    demo_client.post("/templates/new", headers=F, data={
+        "title": "Weekly cleaning", "head_id": head.id, "direction": "OUT", "amount": "500",
+        "freq": "WEEKLY", "interval_n": "1", "start_date": "2026-12-01"})
+    page = demo_client.get("/?freq=month&start=2026-12-01&end=2026-12-31&expand=1").get_data(as_text=True)
+    lines = [ln for ln in page.split("<tr") if "item-row" in ln and "Weekly cleaning" in ln]
+    assert len(lines) == 1 and "2,500" in lines[0] and "×5" in lines[0]
+
+
+def test_template_form_is_simple_and_edit_uses_effective_from(demo_client):
+    from datetime import date
+    from decimal import Decimal
+    c = demo_client
+    form = c.get("/templates/new", headers=F).get_data(as_text=True)
+    for gone in ("Day of the month", "stop after", "Create dates up to", "Split pattern", "Which dates should change",
+                 "Usually 1", "Lekka creates"):
+        assert gone not in form, gone
+    head = Head.query.filter_by(name="Factory rent").first()
+    c.post("/templates/new", headers=F, data={
+        "title": "Housekeeping", "head_id": head.id, "direction": "OUT", "amount": "2,000",
+        "freq": "MONTHLY", "interval_n": "1", "start_date": "2026-11-15"})
+    t = RecurringTemplate.query.filter_by(title="Housekeeping").one()
+    assert t.anchor_day is None and t.split_pattern is None and t.max_occurrences is None
+    edit = c.get(f"/templates/{t.id}/edit", headers=F).get_data(as_text=True)
+    assert "Effective from" in edit and 'value="2026-12-15"' in edit       # next due date (today is 25 Nov)
+    assert "First date" not in edit
+    # raise the amount from the next due date: earlier dates keep 2,000, later ones 2,500, same day of the month
+    r = c.post(f"/templates/{t.id}/edit", headers=F, data={
+        "title": "Housekeeping", "head_id": head.id, "direction": "OUT", "amount": "2,500",
+        "freq": "MONTHLY", "interval_n": "1", "from_date": "2026-12-15"})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    rows = (CashflowEntry.query.filter(CashflowEntry.title == "Housekeeping", CashflowEntry.lifecycle == "ACTIVE")
+            .order_by(CashflowEntry.planned_date).all())
+    assert [(e.planned_date, e.amount) for e in rows[:3]] == [
+        (date(2026, 11, 15), Decimal("2000")), (date(2026, 12, 15), Decimal("2500")), (date(2027, 1, 15), Decimal("2500"))]
+    # an older template's hidden settings survive an edit
+    t2 = RecurringTemplate.query.filter_by(title="Housekeeping", end_date=None).one()
+    t2.anchor_day = -1
+    db.session.commit()
+    c.post(f"/templates/{t2.id}/edit", headers=F, data={
+        "title": "Housekeeping", "head_id": head.id, "direction": "OUT", "amount": "3,000",
+        "freq": "MONTHLY", "interval_n": "1", "from_date": "2027-03-01"})
+    t3 = RecurringTemplate.query.filter_by(title="Housekeeping", end_date=None).one()
+    assert t3.anchor_day == -1 and t3.amount == Decimal("3000")
+
+
+def test_template_party_and_grid_display(demo_client):
+    c = demo_client
+    c.post("/master/vendors/add", data={"name": "CleanCo"}, headers=F)
+    from app.models import Counterparty
+    clean = Counterparty.query.filter_by(name="CleanCo").one()
+    head = Head.query.filter_by(name="Factory rent").first()
+    form = c.get("/templates/new", headers=F).get_data(as_text=True)
+    assert "CleanCo" in form and "+ New party" in form
+    c.post("/templates/new", headers=F, data={
+        "title": "Housekeeping", "head_id": head.id, "direction": "OUT", "amount": "2,000",
+        "freq": "MONTHLY", "interval_n": "1", "start_date": "2026-12-10", "counterparty_id": clean.id})
+    t = RecurringTemplate.query.filter_by(title="Housekeeping").one()
+    dates = CashflowEntry.query.filter_by(template_id=t.id).all()
+    assert t.counterparty_id == clean.id and dates and all(e.counterparty_id == clean.id for e in dates)
+    # a new party typed into the template form
+    c.post("/templates/new", headers=F, data={
+        "title": "Security", "head_id": head.id, "direction": "OUT", "amount": "5,000",
+        "freq": "MONTHLY", "interval_n": "1", "start_date": "2026-12-10", "new_vendor": "Guard Services"})
+    g = RecurringTemplate.query.filter_by(title="Security").one()
+    assert g.counterparty and g.counterparty.name == "Guard Services"
+    page = c.get("/?freq=month&start=2026-12-01&end=2027-01-31").get_data(as_text=True)
+    # totals are there but hidden until the Inflow / Outflow band is clicked
+    assert 'data-total="OUT" hidden' in page and 'class="band js-band"' in page
+    # hover box: title, head and party
+    assert "Party: CleanCo" in page and "Head: Factory rent" in page
+    # a column where the head has a single line is marked, so its amount shows only on that line when open
+    assert "dup" in page

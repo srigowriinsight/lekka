@@ -5,6 +5,8 @@ doc (Design, Screens, Test cases, Edge cases and Prerequisites tabs).
 
 Stack: Python 3.11+, Flask, MariaDB 10.11 (any 10.2+), SQLAlchemy, Alembic migrations, plain HTML/CSS/JS.
 
+**Deploying on the company server: see [DEPLOY.md](DEPLOY.md)** (pre- and post-deployment steps).
+
 ## What works in this version
 
 | Area | What you can do |
@@ -21,11 +23,13 @@ Stack: Python 3.11+, Flask, MariaDB 10.11 (any 10.2+), SQLAlchemy, Alembic migra
 | Recurring templates | More → End series or Delete (handled dates stay as one-off items); title, head, inflow/outflow, amount, daily/weekly/monthly/quarterly/yearly, every N, day (or last day), start; optional end, count, plan-until, split pattern; edit whole series or from a date; pause / resume (with or without skipped dates); end; delete |
 | Adjustments | + or − on any day up to today, remarks optional; own row in the grid |
 | Account | Single account with opening balance and date; bank balance checks with the difference |
-| Master data | Heads as a tree like the OPEX sheet (sub-heads, any depth; items on any head; parents show subtotals in the grid; one head for both directions). Cost centres and counterparties are hidden for now; set `LEKKA_COST_CENTRES=1` in `.env` to show them |
+| Master data | Heads as a tree (sub-heads, any depth), each marked Revenue, Expense or Both; Parties (optional on items, templates and filters); Categories as a tree; Price list with GST and total (picked on new revenue, × qty). Cost centres are hidden; set `LEKKA_COST_CENTRES=1` in `.env` to show them |
+| Review | Report with date presets or own dates, Expense/Revenue, Paid/Unpaid/Overdue, Party/Head/Category filters, grouping, totals and Excel export |
+| Users | Several logins, all with the same rights; add, deactivate, reset passwords |
 | History | Every change with user and time; per-item history in Details |
 
-Not in this version (as agreed): import from Excel, more users and roles, low-balance threshold colour,
-holiday calendar.
+Not in this version (as agreed): import from Excel, roles (all users have the same rights), low-balance threshold
+colour, holiday calendar.
 
 ## Set up on Windows (first time)
 
@@ -97,7 +101,7 @@ Using a MySQL host instead (e.g. Aiven's free MySQL): replace `DATABASE_URL` wit
 pytest
 ```
 
-104 tests cover the worked example, the balance rule, splits, cancelling, linking, recurrence, adjustments and
+162 tests cover the worked example, the balance rule, splits, cancelling, linking, recurrence, adjustments and
 every page. Comments in the tests name the matching test-case IDs from the design doc (TC-…, EC-…, PS-…).
 They run on SQLite by default; to run them on MariaDB, create an empty `lekka_test` database and set
 `LEKKA_TEST_DATABASE_URL` (see `.env.example`).
@@ -111,6 +115,7 @@ They run on SQLite by default; to run them on MariaDB, create an empty `lekka_te
 | `flask set-password NAME` | Change a password |
 | `flask seed-demo` | Load the design doc's worked example |
 | `flask extend-recurring` | Fill recurring templates up to their horizon |
+| `./backup_db.sh` | Linux server backup (gzip, keeps 30 days); `backup_db.bat` on Windows |
 | `flask db migrate -m "..."` | After changing `app/models.py`: create a new migration |
 
 ## Project layout

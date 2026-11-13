@@ -16,7 +16,7 @@
   {% for t in tpls %}
     {% set nd = next_date(t) %}
     <tr>
-      <td><b>{{ t.title }}</b></td>
+      <td><b>{{ t.title }}</b>{% if t.counterparty %}<div class="muted" style="font-size:12px">{{ t.counterparty.name }}</div>{% endif %}</td>
       <td>{{ t.head.name }}</td>
       <td class="num" style="color:{{ 'var(--ok)' if t.direction == 'IN' else 'inherit' }}">{{ '+' if t.direction == 'IN' else '−' }}{{ t.amount|inr }}</td>
       {% set unit = {'DAILY': 'day', 'WEEKLY': 'week', 'MONTHLY': 'month', 'QUARTERLY': 'quarter', 'YEARLY': 'year'}[t.freq] %}

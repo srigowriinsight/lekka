@@ -1,4 +1,4 @@
-{% from "partials/_m.html" import head_title, csrf, nextf, vendor_field %}
+{% from "partials/_m.html" import head_title, csrf, nextf, vendor_field, category_field %}
 <div class="pop">
   {{ head_title('Edit: ' ~ e.title, e.path_titles()[:-1]|join(' › ') if e.parent_id else None) }}
   <form method="post" action="{{ url_for('entries.edit', entry_id=e.id) }}" class="js-form">
@@ -17,10 +17,10 @@
     {% endif %}
     <label>Title</label><input name="title" class="full" maxlength="200" value="{{ e.title }}">
     {% if e.parent_id %}
-      <label>Party</label><div>{{ e.counterparty.name if e.counterparty else '—' }} <span class="muted">(parts use their parent's party)</span></div>
+      <label>Party · Category</label><div>{{ e.counterparty.name if e.counterparty else '—' }} · {{ e.category.path() if e.category else '—' }} <span class="muted">(same as the whole item)</span></div>
     {% else %}
-      {{ vendor_field(vendors, e.direction, e.counterparty_id) }}
-      {% if not e.is_leaf %}<p class="muted" style="font-size:12.5px;margin:4px 0">The party applies to every part.</p>{% endif %}
+      <div class="row2"><div>{{ vendor_field(vendors, e.direction, e.counterparty_id) }}</div>
+        <div>{{ category_field(categories, cat_label, e.category_id) }}</div></div>
     {% endif %}
     {% if e.is_leaf %}
       <label>Amount (₹)</label>

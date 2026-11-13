@@ -194,6 +194,10 @@ class Column:
     is_empty: bool = True
 
 
+# which status a combined cell shows when it holds several dates: the most urgent first
+_RANK = {"OVERDUE": 0, "DUE_SOON": 1, "DUE_TODAY": 1, "PLANNED": 2, "SETTLED": 3, "CANCELLED": 4}
+
+
 class Row(NamedTuple):
     """One head line in the grid. `cells` include its sub-heads (subtotals); `items` are its own items."""
     head: object
@@ -202,6 +206,7 @@ class Row(NamedTuple):
     depth: int = 0
     parent_id: int | None = None
     has_children: bool = False
+    lines_per_col: dict = {}      # column -> how many lines directly under this head (items, sub-heads) show a value
 
 
 def _sum_cells(parts):
@@ -249,7 +254,25 @@ def build_grid(start: date, end: date, freq: str = "day", t: date | None = None,
         return None
 
     cells = {IN: defaultdict(lambda: defaultdict(Cell)), OUT: defaultdict(lambda: defaultdict(Cell))}
-    item_rows = {IN: defaultdict(dict), OUT: defaultdict(dict)}   # head -> entry -> {col: Cell}
+    # head -> row key -> {"entry", "entries", "cells": {col: {...}}}. The dates of one recurring template share
+    # one line (one amount per column); every other item has a line of its own.
+    item_rows = {IN: defaultdict(dict), OUT: defaultdict(dict)}
+
+    def add_item(e, i, amount, st, counted):
+        root = e.ancestors()[-1] if e.parent_id else e
+        key = ("t", root.template_id, tuple(e.path_titles())) if root.template_id else e.id
+        ic = item_rows[e.direction][e.head_id].setdefault(
+            key, {"entry": e, "entries": [], "cells": {}, "recurring": bool(root.template_id)})
+        ic["entries"].append(e)
+        c = ic["cells"].get(i)
+        if c is None:
+            ic["cells"][i] = {"amount": amount, "status": st, "counted": counted, "entries": [e]}
+        else:                                  # two dates of one template in the same column (e.g. weekly, month view)
+            c["amount"] += amount
+            c["entries"].append(e)
+            c["counted"] = c["counted"] and counted
+            if _RANK.get(st, 9) < _RANK.get(c["status"], 9):
+                c["status"] = st
     heads_used = {IN: set(), OUT: set()}
     for e in leaves:
         i = col_index(display_date(e))
@@ -259,8 +282,7 @@ def build_grid(start: date, end: date, freq: str = "day", t: date | None = None,
             if item_filter != "all":
                 continue
             cells[e.direction][e.head_id][i].cancelled.append(e)
-            ic = item_rows[e.direction][e.head_id].setdefault(e.id, {"entry": e, "cells": {}})
-            ic["cells"][i] = {"amount": e.amount, "status": "CANCELLED", "counted": False}
+            add_item(e, i, e.amount, "CANCELLED", False)
             heads_used[e.direction].add(e.head_id)
             continue
         st = status(e, t)
@@ -281,8 +303,7 @@ def build_grid(start: date, end: date, freq: str = "day", t: date | None = None,
         cell.shown += e.amount
         cell.items.append(e)
         cell.by_status[st] += e.amount
-        ic = item_rows[e.direction][e.head_id].setdefault(e.id, {"entry": e, "cells": {}})
-        ic["cells"][i] = {"amount": e.amount, "status": st, "counted": counted}
+        add_item(e, i, e.amount, st, counted)
         heads_used[e.direction].add(e.head_id)
 
     for adj in adjs:
@@ -331,12 +352,22 @@ def build_grid(start: date, end: date, freq: str = "day", t: date | None = None,
                 totals[hid] = {i: _sum_cells([p[i] for p in parts if i in p]) for i in sorted(idx)}
             return totals[hid]
 
+        def lines(hid):
+            n = defaultdict(int)
+            for it in item_rows[d][hid].values():
+                for i in it["cells"]:
+                    n[i] += 1
+            for k in kids.get(hid, []):
+                for i in total(k):
+                    n[i] += 1
+            return dict(n)
+
         rows[d] = [Row(h, total(h.id),
                        sorted(item_rows[d][h.id].values(),
                               key=lambda x: (min(x["cells"]) if x["cells"] else 0, x["entry"].id)),
                        h.depth if h.parent_id in shown else 0,
                        h.parent_id if h.parent_id in shown else None,
-                       bool(kids.get(h.id)))
+                       bool(kids.get(h.id)), lines(h.id))
                    for h in tree if h.id in shown]
     return Grid(cols, rows, t, freq)
 

@@ -22,8 +22,10 @@ from ._util import done, fail, fragment, handles_errors, is_fetch, safe_next
 bp = Blueprint("entries", __name__)
 
 
-def _lists(direction=OUT, keep_vendor=None, keep_head=None):
+def _lists(direction=OUT, keep_vendor=None, keep_head=None, keep_category=None):
+    from ..services import categories as cat_svc
     return dict(
+        categories=cat_svc.offered(keep_category), cat_label=cat_svc.label,
         heads=head_svc.for_direction(direction, keep_head),
         share_heads=head_svc.for_direction(OUT),          # the partner share is an expense
         cost_centres=CostCentre.query.filter_by(is_active=True).order_by(CostCentre.name).all(),
@@ -193,7 +195,7 @@ def create():
     e = svc.create_entry(direction=direction, head_id=head_id, title=title, amount=amount,
                          planned_date=planned, remarks=f.get("remarks"),
                          cost_centre_id=f.get("cost_centre_id") or None,
-                         counterparty_id=vendor_id,
+                         counterparty_id=vendor_id, category_id=f.get("category_id") or None,
                          reference_no=f.get("reference_no"),
                          settled_on=planned if already else None)
     shared = svc.add_partner_share(e, share) if share else None
@@ -236,7 +238,7 @@ def edit(entry_id):
                         new_amount=request.args.get("amount"),
                         shares=svc.partner_shares(e) if shared else [],
                         share_pct=format(svc.our_share_pct(e), "f") if shared else None,
-                        **_lists(e.direction, e.counterparty_id, e.head_id))
+                        **_lists(e.direction, e.counterparty_id, e.head_id, e.category_id))
     f = request.form
     asks_share = e.direction == IN and e.parent_id is None and "share_pct" in f
     before = (e.amount, sum((s.amount for s in svc.partner_shares(e)), Decimal("0"))) if asks_share else None
@@ -244,6 +246,7 @@ def edit(entry_id):
                    remarks=f.get("remarks", ""), head_id=_head_from_form(f, e.direction) if e.parent_id is None else None,
                    counterparty_id=vendors.from_form(f, e.direction) if e.parent_id is None else None,
                    cost_centre_id=f.get("cost_centre_id") or None,
+                   category_id=f.get("category_id") if e.parent_id is None and "category_id" in f else None,
                    reference_no=f.get("reference_no", ""), expected_version=f.get("version"),
                    follow_shares=not asks_share)
     note = svc.update_partner_share(e, f, before=before) if asks_share else getattr(e, "share_note", None)

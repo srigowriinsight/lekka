@@ -17,7 +17,8 @@ from .entries import _cancel_leaf, _check_head, _check_remarks, _check_title, _r
 
 FREQS = ("DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY")
 TPL_FIELDS = ["title", "head_id", "direction", "amount", "freq", "interval_n", "anchor_day",
-              "start_date", "end_date", "max_occurrences", "horizon_until", "split_pattern", "is_active"]
+              "start_date", "end_date", "max_occurrences", "horizon_until", "split_pattern", "is_active",
+              "counterparty_id"]
 
 
 # ---------------------------------------------------------------- dates
@@ -116,6 +117,12 @@ def _validate(data: dict) -> dict:
             raise LekkaError("The split pattern needs two or more parts adding up to 100%.")
     out["split_pattern"] = pattern
     out["remarks"] = _check_remarks(data.get("remarks"))
+    cp = data.get("counterparty_id")
+    if cp not in (None, ""):
+        from ..models import Counterparty
+        if db.session.get(Counterparty, int(cp)) is None:
+            raise LekkaError("That party no longer exists. Reload and choose again.")
+    out["counterparty_id"] = int(cp) if cp not in (None, "") else None
     return out
 
 
@@ -123,7 +130,8 @@ def _validate(data: dict) -> dict:
 
 def _make_occurrence(tpl, d):
     e = create_entry(direction=tpl.direction, head_id=tpl.head_id, title=tpl.title, amount=tpl.amount,
-                     planned_date=d, template_id=tpl.id, occurrence_date=d, audit_action=None)
+                     planned_date=d, template_id=tpl.id, occurrence_date=d, audit_action=None,
+                     counterparty_id=tpl.counterparty_id)
     if tpl.split_pattern:
         parts, left = [], tpl.amount
         for i, p in enumerate(tpl.split_pattern):
@@ -256,6 +264,18 @@ def update_template(tpl: RecurringTemplate, data: dict, scope: str, from_date=No
               new=snapshot(new, TPL_FIELDS))
         return new, kept
     raise LekkaError("Choose which dates the change applies to.")
+
+
+def update_template_from(tpl: RecurringTemplate, data: dict, effective_from):
+    """Edit a template with one date, 'Effective from': dates from that day on follow the new values and repeat
+    from it (so changing it to the 5th moves later dates to the 5th); earlier dates stay as they were.
+    From the first date or earlier, the whole rule is replaced. Handled dates are never changed."""
+    eff = parse_date(effective_from, "Effective from date")
+    if eff <= tpl.start_date:
+        data = dict(data, start_date=eff.isoformat())
+        return update_template(tpl, data, "series")
+    data = dict(data, start_date=eff.isoformat())
+    return update_template(tpl, data, "future", eff)
 
 
 def pause(tpl: RecurringTemplate, on_date=None):

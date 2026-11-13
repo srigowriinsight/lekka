@@ -139,8 +139,10 @@ class RecurringTemplate(TimestampMixin, db.Model):
     supersedes_id = db.Column(db.Integer, db.ForeignKey("recurring_template.id"))
     remarks = db.Column(db.Text)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    counterparty_id = db.Column(db.Integer, db.ForeignKey("counterparty.id", name="fk_template_counterparty"))
 
     head = db.relationship("Head")
+    counterparty = db.relationship("Counterparty")
 
 
 class CashflowEntry(TimestampMixin, db.Model):
@@ -155,6 +157,8 @@ class CashflowEntry(TimestampMixin, db.Model):
     head_id = db.Column(db.Integer, db.ForeignKey("head.id"), nullable=False)
     cost_centre_id = db.Column(db.Integer, db.ForeignKey("cost_centre.id"))
     counterparty_id = db.Column(db.Integer, db.ForeignKey("counterparty.id"))
+    # optional product category (Master data → Categories); set from the product picked on revenue, or by hand
+    category_id = db.Column(db.Integer, db.ForeignKey("category.id", name="fk_entry_category"), index=True)
     amount = db.Column(Money, nullable=False)
     planned_date = db.Column(db.Date)
     original_planned_date = db.Column(db.Date)
@@ -174,6 +178,7 @@ class CashflowEntry(TimestampMixin, db.Model):
 
     head = db.relationship("Head")
     counterparty = db.relationship("Counterparty")
+    category = db.relationship("Category")
     cost_centre = db.relationship("CostCentre")
     template = db.relationship("RecurringTemplate")
     parent = db.relationship("CashflowEntry", remote_side=[id], back_populates="children", foreign_keys=[parent_id])

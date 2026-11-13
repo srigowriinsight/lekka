@@ -15,7 +15,7 @@
 </div>
 
 {% if tab == 'heads' %}
-  <p class="muted" style="margin-top:0">Heads are the categories in the grid and on the Expense and Revenue pages, arranged as a tree like the OPEX sheet: a head can have sub-heads, and a parent's figures in the grid include its sub-heads. <b>For</b> says where a head is offered: <b>Expense</b> heads on expenses, <b>Revenue</b> heads on revenue, <b>Both</b> on either. Sub-heads of an expense or revenue head are of the same kind. Order sets the order among heads at the same level; heads in use are deactivated, never deleted.</p>
+  <p class="muted" style="margin-top:0">Heads are the categories in the grid and on the Expense and Revenue pages, arranged as a tree like the OPEX sheet: a head can have sub-heads, and a parent's figures in the grid include its sub-heads. <b>For</b> says where a head is offered: <b>Expense</b> heads on expenses, <b>Revenue</b> heads on revenue, <b>Both</b> on either. Sub-heads of an expense or revenue head are of the same kind. Heads are listed in A–Z order; heads in use are deactivated, never deleted.</p>
   <form method="post" action="{{ url_for('heads.add', kind='heads') }}" id="add-head" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
     {{ csrf() }}{{ nextf(url_for('heads.index')) }}
     <input name="name" placeholder="New head, e.g. Packing material" style="min-width:300px" required {{ 'autofocus' if under }}>
@@ -31,17 +31,16 @@
     <button class="primary">+ Add head</button>
   </form>
   <table class="list">
-    <thead><tr><th style="width:80px">Order</th><th>Head</th><th>Under</th><th>For</th><th>Used now for</th><th class="num">Items</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Head</th><th>Under</th><th>For</th><th>Used now for</th><th class="num">Items</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {% for h in heads %}
       {% set fid = 'h' ~ h.id %}
       <tr>
-        <td><input name="sort_order" form="{{ fid }}" value="{{ h.sort_order }}" style="width:60px" aria-label="Order"></td>
         <td>
           <form method="post" id="{{ fid }}" action="{{ url_for('heads.update', kind='heads', obj_id=h.id) }}" style="display:flex;gap:6px;align-items:center;padding-left:{{ h.depth * 22 }}px">
             {{ csrf() }}{{ nextf(url_for('heads.index')) }}
             {% if h.depth %}<span class="muted">↳</span>{% endif %}
-            <input name="name" value="{{ h.name }}" style="flex:1;max-width:320px;{{ 'font-weight:600' if h.children }}" class="{{ 'struck' if not h.is_active }}" aria-label="Name">
+            <input name="name" value="{{ h.name }}" style="flex:1;max-width:320px;font-weight:{{ 700 if h.children else 600 }}" class="{{ 'struck' if not h.is_active }}" aria-label="Name">
           </form>
         </td>
         <td>
@@ -68,7 +67,7 @@
           </form>
         </td>
       </tr>
-    {% else %}<tr><td colspan="8" class="muted" style="padding:14px">No heads yet. Add the first one above.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7" class="muted" style="padding:14px">No heads yet. Add the first one above.</td></tr>{% endfor %}
     </tbody>
   </table>
 {% elif tab == 'parties' %}
@@ -121,7 +120,7 @@
   </table>
 {% elif tab == 'categories' %}
   {% set back = url_for('heads.index', tab='categories') %}
-  <p class="muted" style="margin-top:0">Categories group the products in the price list. A category can have sub-categories, as deep as needed (Controllers › PLC › Compact). Choose the category of each product in the Price list. Order sets the order among categories at the same level.</p>
+  <p class="muted" style="margin-top:0">Categories group the products in the price list. A category can have sub-categories, as deep as needed (Controllers › PLC › Compact). Choose the category of each product in the Price list. Categories are listed in A–Z order.</p>
   <form method="post" action="{{ url_for('heads.add_category') }}" class="price-add" id="add-category">
     {{ csrf() }}{{ nextf(back) }}
     <label>Name<input name="name" required maxlength="120" placeholder="e.g. PLC controllers" style="min-width:260px" {{ 'autofocus' if not categories }}></label>
@@ -132,12 +131,11 @@
     <button class="primary">+ Add category</button>
   </form>
   <table class="list price-list">
-    <thead><tr><th style="width:80px">Order</th><th>Category</th><th>Under</th><th class="num">Products</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Category</th><th>Under</th><th class="num">Products</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {% for c in categories %}
       {% set fid = 'c' ~ c.id %}
       <tr>
-        <td><input name="sort_order" form="{{ fid }}" value="{{ c.sort_order }}" style="width:60px" aria-label="Order"></td>
         <td>
           <form method="post" id="{{ fid }}" action="{{ url_for('heads.update_category', cat_id=c.id) }}">{{ csrf() }}{{ nextf(back) }}</form>
           <div style="display:flex;gap:6px;align-items:center;padding-left:{{ c.depth * 22 }}px">
@@ -153,7 +151,7 @@
         <td>{{ 'Active' if c.is_active else 'Inactive' }}</td>
         <td class="acts">
           <button class="small" form="{{ fid }}">Save</button>
-          <a class="btn small" href="{{ url_for('heads.index', tab='categories', under=c.id) }}" title="Add a category inside '{{ c.name }}'">+ Sub-category</a>
+          <a class="btn small" href="#" data-dialog="{{ url_for('heads.new_category_form', under=c.id, next=url_for('heads.index', tab='categories')) }}" title="Add a category inside '{{ c.name }}'">+ Sub-category</a>
           <form method="post" action="{{ url_for('heads.update_category', cat_id=c.id) }}" style="display:inline">
             {{ csrf() }}{{ nextf(back) }}<input type="hidden" name="toggle" value="1">
             <button class="small">{{ 'Deactivate' if c.is_active else 'Activate' }}</button>
@@ -166,7 +164,7 @@
           {% endif %}
         </td>
       </tr>
-    {% else %}<tr><td colspan="6" class="muted" style="padding:14px">No categories yet. Add the first one above.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="5" class="muted" style="padding:14px">No categories yet. Add the first one above.</td></tr>{% endfor %}
     </tbody>
   </table>
 {% elif tab == 'prices' %}

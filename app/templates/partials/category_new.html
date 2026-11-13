@@ -1,0 +1,15 @@
+{% from "partials/_m.html" import head_title, csrf, nextf %}
+<div class="pop">
+  {{ head_title('Add sub-category under ' ~ parent.name if parent else 'Add category') }}
+  <form method="post" action="{{ url_for('heads.add_category') }}" class="js-form">
+    {{ csrf() }}{{ nextf(next) }}
+    <div class="form-error"></div>
+    <label>Name</label><input name="name" class="full" maxlength="120" required autofocus>
+    <label>Under</label>
+    <select name="parent_id" class="full">
+      <option value="">— Top level —</option>
+      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if parent and parent.id == c.id }}>{{ cat_label(c) }}</option>{% endfor %}
+    </select>
+    <footer><button type="button" data-close>Cancel</button><button type="submit" class="primary">Add</button></footer>
+  </form>
+</div>

@@ -11,6 +11,8 @@ def create_app(config_object=None):
     from .config import Config
     app = Flask(__name__)
     app.config.from_object(config_object or Config)
+    if not app.testing and app.config.get("SECRET_KEY") in (None, "", "change-me-in-.env"):
+        app.logger.warning("SECRET_KEY is not set in .env: set a long random value before going live.")
     if app.config.get("BEHIND_PROXY"):
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
