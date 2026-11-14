@@ -19,6 +19,7 @@
       {% set r = e.date_range() %}<div>Dates</div><div>{{ dm(r[0]) }}{% if r[1] != r[0] %} – {{ dm(r[1]) }}{% endif %}</div>
     {% endif %}
     {% if e.category %}<div>Category</div><div>{{ e.category.path() }}</div>{% endif %}
+    {% if e.product_type %}<div>Type</div><div>{{ e.product_type.path() }}</div>{% endif %}
     {% if e.counterparty %}<div>Party</div><div>{{ e.counterparty.name }}{% if e.counterparty.gstin %} <span class="muted">· GSTIN {{ e.counterparty.gstin }}</span>{% endif %}</div>{% endif %}
     {% if show_cc and e.cost_centre %}<div>Cost centre</div><div>{{ e.cost_centre.name }}</div>{% endif %}
     {% if e.reference_no %}<div>Reference</div><div>{{ e.reference_no }}</div>{% endif %}

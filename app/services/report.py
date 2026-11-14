@@ -1,6 +1,6 @@
 """Review page: one filterable list of money in and out (each dated payment: a part of a split item counts on its
 own), with totals. Filters: dates, expense/revenue, paid/unpaid/overdue, parties, heads (with their sub-heads),
-categories (with their sub-categories), in any combination; optionally grouped."""
+categories and product types (each with their subs), in any combination; optionally grouped."""
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -10,14 +10,15 @@ from sqlalchemy import case, exists
 from sqlalchemy.orm import aliased
 
 from ..extensions import db
-from ..models import IN, OUT, CashflowEntry, Category, Counterparty, Head
+from ..models import IN, OUT, CashflowEntry, Category, Counterparty, Head, ProductType
 from .common import today
 
 PRESETS = [("this_month", "This month"), ("last_month", "Last month"), ("next_30", "Next 30 days"),
            ("this_quarter", "This quarter"), ("this_fy", "This year (Apr–Mar)")]
 STATUSES = [("all", "All"), ("paid", "Paid"), ("unpaid", "Unpaid"), ("overdue", "Overdue")]
 TYPES = [("all", "All"), ("OUT", "Expense"), ("IN", "Revenue")]
-GROUPS = [("", "No grouping"), ("date", "Month"), ("party", "Party"), ("head", "Head"), ("category", "Category")]
+GROUPS = [("", "No grouping"), ("date", "Month"), ("party", "Party"), ("head", "Head"), ("category", "Category"),
+          ("ptype", "Type")]
 
 
 def _month_start(d):
@@ -73,6 +74,7 @@ def params(args):
         "type": args.get("type") if args.get("type") in (IN, OUT) else "all",
         "status": status if status in dict(STATUSES) else "all",
         "parties": _ids(args, "party"), "heads": _ids(args, "head"), "cats": _ids(args, "cat"),
+        "ptypes": _ids(args, "ptype"),
         "group": args.get("group") if args.get("group") in dict(GROUPS) else "",
     }
 
@@ -133,15 +135,18 @@ def run(p) -> Result:
             if h:
                 ids.update(h.subtree_ids())
         q = q.filter(CashflowEntry.head_id.in_(ids or [-1]))
-    if p["cats"]:
+    for key, model, col in (("cats", Category, CashflowEntry.category_id),
+                            ("ptypes", ProductType, CashflowEntry.product_type_id)):
+        if not p[key]:
+            continue
         ids = set()
-        for x in p["cats"]:
-            c = db.session.get(Category, int(x)) if x.isdigit() else None
+        for x in p[key]:
+            c = db.session.get(model, int(x)) if x.isdigit() else None
             if c:
                 ids.update(c.subtree_ids())
-        conds = [CashflowEntry.category_id.in_(ids)] if ids else []
-        if "none" in p["cats"]:
-            conds.append(CashflowEntry.category_id.is_(None))
+        conds = [col.in_(ids)] if ids else []
+        if "none" in p[key]:
+            conds.append(col.is_(None))
         q = q.filter(db.or_(*conds) if conds else CashflowEntry.id < 0)
     rows = sorted(q.all(), key=lambda e: (when(e), e.direction, e.id))
 
@@ -160,15 +165,17 @@ def run(p) -> Result:
                 key = label = e.counterparty.name if e.counterparty else "No party"
             elif p["group"] == "head":
                 key = label = e.head.path() if e.head else "—"
-            else:
+            elif p["group"] == "category":
                 key = label = e.category.path() if e.category else "No category"
+            else:
+                key = label = e.product_type.path() if e.product_type else "No type"
             g = groups.setdefault(key, Group(label))
             g.rows.append(e)
             if e.direction == IN:
                 g.money_in += e.amount
             else:
                 g.money_out += e.amount
-        order = sorted(groups) if p["group"] == "date" else sorted(groups, key=lambda k: (k in ("No party", "No category"), str(k).lower()))
+        order = sorted(groups) if p["group"] == "date" else sorted(groups, key=lambda k: (k in ("No party", "No category", "No type"), str(k).lower()))
         res.groups = [groups[k] for k in order]
     return res
 
@@ -176,8 +183,10 @@ def run(p) -> Result:
 def choices():
     from .categories import tree_order as cat_tree
     from .heads import tree_order as head_tree
+    from .product_types import tree_order as type_tree
     return {
         "parties": Counterparty.query.order_by(Counterparty.name).all(),
         "heads": head_tree(),
         "cats": cat_tree(),
+        "ptypes": type_tree(),
     }

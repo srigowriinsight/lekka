@@ -109,8 +109,6 @@
     if (title && (!title.value.trim() || title.dataset.auto === "1")) {
       title.value = o.dataset.name; title.dataset.auto = "1"; title.dispatchEvent(new Event("input", { bubbles: true }));
     }
-    const cat = f.querySelector(".js-category");
-    if (cat && o.dataset.category && !cat.dataset.touched) cat.value = o.dataset.category;
     const line = `${fmt(qty)} × ${o.dataset.name} @ ₹${fmt(price)} incl. GST`;
     if (rem && (!rem.value.trim() || rem.dataset.auto === "1")) { rem.value = line; rem.dataset.auto = "1"; }
     if (note) { note.hidden = false; note.textContent = `Amount = ₹${fmt(price)} × ${fmt(qty)} = ₹${fmt(amount)} (price incl. GST × qty). You can still change it.`; }
@@ -121,7 +119,6 @@
   document.addEventListener("input", (ev) => {
     if (!ev.target.matches) return;
     if (ev.target.matches(".js-qty")) productFill(ev.target.form);
-    if (ev.target.matches(".js-category") && ev.isTrusted) ev.target.dataset.touched = "1";
     // typed by hand: stop replacing it
     if (ev.isTrusted && (ev.target.name === "title" || ev.target.name === "remarks")) delete ev.target.dataset.auto;
   });

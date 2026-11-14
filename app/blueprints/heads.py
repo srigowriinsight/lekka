@@ -1,12 +1,14 @@
-"""Master data: heads (where heads are created and managed), vendors, the price list, cost centres."""
+"""Master data: heads (where heads are created and managed), parties, categories, types, the price list,
+cost centres."""
 from flask import Blueprint, current_app, render_template, request
 from flask_login import login_required
 
 from ..extensions import db
-from ..models import CashflowEntry, Category, CostCentre, Counterparty, Head, PriceItem
+from ..models import CashflowEntry, CostCentre, Counterparty, Head, PriceItem
 from ..services import prices as price_list
 from ..services import vendors as vendor_list
 from ..services import categories as cat_svc
+from ..services import product_types as type_svc
 from ..services.common import LekkaError, audit
 from ..services.heads import KINDS as HEAD_KINDS, check_kind_under, read_kind, set_kind, set_parent, tree_order
 from ._util import done, fragment, handles_errors, safe_next
@@ -22,7 +24,7 @@ def index():
     tab = request.args.get("tab", "heads")
     if tab in ("counterparties", "vendors"):
         tab = "parties"
-    if tab not in ("heads", "parties", "prices", "categories") and not current_app.config.get("SHOW_COST_CENTRES"):
+    if tab not in ("heads", "parties", "prices", "categories", "types") and not current_app.config.get("SHOW_COST_CENTRES"):
         tab = "heads"
     usage = dict(db.session.query(CashflowEntry.head_id, db.func.count(CashflowEntry.id))
                  .filter(CashflowEntry.parent_id.is_(None), CashflowEntry.lifecycle != "DELETED")
@@ -39,22 +41,35 @@ def index():
                            vendor_usage=vendor_list.usage() if tab == "parties" else {},
                            usage=usage, used_for=both,
                            prices=_price_rows(), gst_rates=price_list.GST_RATES,
-                           price_cat=request.args.get("cat", ""),
-                           categories=cat_svc.tree_order() if tab in ("categories", "prices") else [],
-                           cat_choices=cat_svc.offered(), cat_label=cat_svc.label,
-                           cat_products=({c.id: cat_svc.products_in(c) for c in cat_svc.tree_order()}
-                                         if tab == "categories" else {}))
+                           price_type=request.args.get("type", ""),
+                           types=type_svc.tree_order() if tab == "prices" else [],
+                           type_choices=type_svc.offered() if tab == "prices" else [], tree_label=type_svc.label,
+                           tree=_tree_page(tab))
+
+
+TREES = {"categories": cat_svc, "types": type_svc}
+
+
+def _tree_page(tab):
+    """What the Categories or Types tab shows: every entry, and how many items / products use each."""
+    if tab not in TREES:
+        return None
+    svc = TREES[tab]
+    rows = svc.tree_order()
+    return {"kind": tab, "rows": rows, "usage": {c.id: svc.usage(c) for c in rows},
+            "noun": svc.LIST.noun, "subs": svc.LIST.subs}
 
 
 def _price_rows():
-    """Price list rows, optionally only one category (with its sub-categories): ?cat=<id>, or ?cat=none."""
+    """Price list rows, optionally only one type (with its sub-types): ?type=<id>, or ?type=none."""
+    from ..models import ProductType
     q = PriceItem.query
-    cat = request.args.get("cat", "")
-    if cat == "none":
-        q = q.filter(PriceItem.category_id.is_(None))
-    elif cat.isdigit():
-        c = db.session.get(Category, int(cat))
-        q = q.filter(PriceItem.category_id.in_(c.subtree_ids() if c else [int(cat)]))
+    t = request.args.get("type", "")
+    if t == "none":
+        q = q.filter(PriceItem.product_type_id.is_(None))
+    elif t.isdigit():
+        node = db.session.get(ProductType, int(t))
+        q = q.filter(PriceItem.product_type_id.in_(node.subtree_ids() if node else [int(t)]))
     return q.order_by(PriceItem.product).all()
 
 
@@ -108,51 +123,57 @@ def delete_vendor(vendor_id):
     return done(f"'{name}' removed from the party list.")
 
 
-# ---------------------------------------------------------------- categories
+# ---------------------------------------------------------------- categories and types (same screens)
 
-def _category(cat_id):
-    c = db.session.get(Category, cat_id)
+KIND = "<any(categories, types):kind>"
+
+
+def _node(kind, node_id):
+    svc = TREES[kind]
+    c = db.session.get(svc.LIST.model, node_id)
     if c is None:
-        raise LekkaError("That category no longer exists. Reload the page.")
+        raise LekkaError(f"That {svc.LIST.noun} no longer exists. Reload the page.")
     return c
 
 
-@bp.route("/categories/new")
+@bp.route(f"/{KIND}/new")
 @login_required
-def new_category_form():
-    """Popup to add a category, here inside another one (+ Sub-category)."""
-    parent = db.session.get(Category, int(request.args["under"])) if request.args.get("under", "").isdigit() else None
-    return fragment("partials/category_new.html", parent=parent, categories=cat_svc.tree_order(),
-                    cat_label=cat_svc.label, next=safe_next())
+def new_tree_form(kind):
+    """Popup to add a category or a type, here inside another one (+ Sub-category / + Sub-type)."""
+    svc = TREES[kind]
+    under = request.args.get("under", "")
+    parent = db.session.get(svc.LIST.model, int(under)) if under.isdigit() else None
+    return fragment("partials/tree_new.html", kind=kind, noun=svc.LIST.noun, parent=parent,
+                    rows=svc.tree_order(), tree_label=svc.label, next=safe_next())
 
 
-@bp.route("/categories/add", methods=["POST"])
+@bp.route(f"/{KIND}/add", methods=["POST"])
 @login_required
 @handles_errors
-def add_category():
-    c = cat_svc.add(request.form)
+def add_tree(kind):
+    c = TREES[kind].add(request.form)
     return done(f"'{c.path()}' added.")
 
 
-@bp.route("/categories/<int:cat_id>", methods=["POST"])
+@bp.route(f"/{KIND}/<int:node_id>", methods=["POST"])
 @login_required
 @handles_errors
-def update_category(cat_id):
-    c = _category(cat_id)
+def update_tree(kind, node_id):
+    c = _node(kind, node_id)
     if request.form.get("toggle"):
-        cat_svc.set_active(c, not c.is_active)
+        TREES[kind].set_active(c, not c.is_active)
         return done(f"'{c.name}' {'activated' if c.is_active else 'deactivated'}.")
-    changed = cat_svc.update(c, request.form)
+    changed = TREES[kind].update(c, request.form)
     return done("Saved." if changed else "Nothing changed.")
 
 
-@bp.route("/categories/<int:cat_id>/delete", methods=["POST"])
+@bp.route(f"/{KIND}/<int:node_id>/delete", methods=["POST"])
 @login_required
 @handles_errors
-def delete_category(cat_id):
-    c = _category(cat_id)
+def delete_tree(kind, node_id):
+    c = _node(kind, node_id)
     name = c.name
-    cat_svc.delete(c)
+    TREES[kind].delete(c)
     return done(f"'{name}' removed.")
 
 

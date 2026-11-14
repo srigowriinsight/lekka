@@ -254,15 +254,16 @@ def build_grid(start: date, end: date, freq: str = "day", t: date | None = None,
         return None
 
     cells = {IN: defaultdict(lambda: defaultdict(Cell)), OUT: defaultdict(lambda: defaultdict(Cell))}
-    # head -> row key -> {"entry", "entries", "cells": {col: {...}}}. The dates of one recurring template share
-    # one line (one amount per column); every other item has a line of its own.
+    # head -> party -> {"party", "entry", "entries", "cells": {col: {...}}}. Under each head there is one line per
+    # party: all its items (and recurring dates) on that head add up on its line; their titles show on hover.
     item_rows = {IN: defaultdict(dict), OUT: defaultdict(dict)}
 
     def add_item(e, i, amount, st, counted):
         root = e.ancestors()[-1] if e.parent_id else e
-        key = ("t", root.template_id, tuple(e.path_titles())) if root.template_id else e.id
+        party = e.counterparty or root.counterparty          # older items may have none: a 'No party' line
         ic = item_rows[e.direction][e.head_id].setdefault(
-            key, {"entry": e, "entries": [], "cells": {}, "recurring": bool(root.template_id)})
+            party.id if party else None, {"party": party, "entry": e, "entries": [], "cells": {}, "recurring": False})
+        ic["recurring"] = ic["recurring"] or bool(root.template_id)
         ic["entries"].append(e)
         c = ic["cells"].get(i)
         if c is None:
@@ -364,7 +365,7 @@ def build_grid(start: date, end: date, freq: str = "day", t: date | None = None,
 
         rows[d] = [Row(h, total(h.id),
                        sorted(item_rows[d][h.id].values(),
-                              key=lambda x: (min(x["cells"]) if x["cells"] else 0, x["entry"].id)),
+                              key=lambda x: (x["party"] is None, x["party"].name.lower() if x["party"] else "")),
                        h.depth if h.parent_id in shown else 0,
                        h.parent_id if h.parent_id in shown else None,
                        bool(kids.get(h.id)), lines(h.id))

@@ -99,3 +99,35 @@ def test_category_on_items(client):
     assert all(c.category_id == plc for c in CashflowEntry.query.filter_by(title="Sale B").one().children)
     form = client.get("/entries/new?direction=IN", headers=F).get_data(as_text=True)
     assert 'name="category_id"' in form and "PLC" in form
+
+
+def test_type_filter_and_group(client, set_today):
+    """Type (from the product picked on revenue) filters and groups next to Category; Excel has both."""
+    from app.models import PriceItem, ProductType
+    set_today("2026-11-25")
+    h, party, plc = _setup(client)
+    t = ProductType(name="Controllers")
+    db.session.add(t)
+    db.session.flush()
+    db.session.add(PriceItem(product="CX-200", price=Decimal("10000"), gst_rate=Decimal("18"), product_type_id=t.id))
+    db.session.commit()
+    cx = PriceItem.query.one()
+    r = client.post("/entries/new", headers=F, data={
+        "direction": "IN", "head_id": h("Sales"), "title": "CX-200 x2", "amount": "23600",
+        "planned_date": "2026-11-20", "counterparty_id": party("Zen"), "product_id": cx.id})
+    assert r.status_code == 200
+    base = "/review?start=2026-11-01&end=2026-12-31"
+    page = client.get(f"{base}&ptype={t.id}").get_data(as_text=True)
+    assert "CX-200 x2" in page and "Sale A" not in page and "Type: Controllers" in page
+    page = client.get(f"{base}&ptype=none&type=IN").get_data(as_text=True)
+    assert "CX-200 x2" not in page and "Sale A" in page and "Sale B" in page
+    # combined with category: Sale A has a category but no type, so nothing matches both
+    assert "Nothing matches" in client.get(f"{base}&ptype={t.id}&cat={plc}").get_data(as_text=True)
+    page = client.get(f"{base}&group=ptype").get_data(as_text=True)
+    table = page.split('class="list rv-table"')[1]
+    assert table.index("Controllers <span") < table.index("No type <span")          # A–Z, 'No type' last
+    from io import BytesIO
+    from openpyxl import load_workbook
+    ws = load_workbook(BytesIO(client.get(f"/review/export?start=2026-11-01&end=2026-12-31&ptype={t.id}").data)).active
+    assert [c.value for c in ws[3]][4:6] == ["Category", "Type"]
+    assert ws.cell(4, 2).value == "CX-200 x2" and ws.cell(4, 6).value == "Controllers"

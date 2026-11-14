@@ -39,9 +39,9 @@
   {% endif %}
 {% endmacro %}
 {% macro vendor_field(vendors, direction, selected=None, name='counterparty_id', new_name='new_vendor', label=None) %}
-  <label>{{ label or 'Party' }} <span class="muted" style="font-weight:400">(optional)</span></label>
+  <label>{{ label or 'Party' }}</label>
   <select name="{{ name }}" class="full">
-    <option value="">— None —</option>
+    <option value="">— Choose —</option>
     {% for c in vendors %}<option value="{{ c.id }}" {{ 'selected' if selected == c.id }}>{{ c.name }}{{ ' (inactive)' if not c.is_active }}</option>{% endfor %}
   </select>
   {% if new_name %}

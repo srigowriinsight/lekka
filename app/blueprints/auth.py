@@ -3,6 +3,7 @@ from flask_login import login_required, login_user, logout_user
 
 from ..extensions import db
 from ..models import User
+from ._util import with_root
 
 bp = Blueprint("auth", __name__)
 
@@ -15,7 +16,7 @@ def login():
         if u and u.active and u.check_password(request.form.get("password") or ""):
             login_user(u, remember=bool(request.form.get("remember")))
             nxt = request.args.get("next") or ""
-            return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("grid.index"))
+            return redirect(with_root(nxt) if nxt.startswith("/") and not nxt.startswith("//") else url_for("grid.index"))
         flash("Wrong username or password.", "error")
     return render_template("login.html")
 

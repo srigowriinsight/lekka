@@ -31,8 +31,7 @@ def _form_data(f, tpl=None):
         data[k] = v
     if tpl is not None and f.get("freq") != tpl.freq:
         data["anchor_day"] = None          # a day of the week means nothing monthly, and the other way round
-    cp = vendors.from_form(f, f.get("direction"))          # optional party, or one typed into '+ New party'
-    data["counterparty_id"] = cp if cp not in (None, "") else None
+    data["counterparty_id"] = vendors.required_from_form(f, f.get("direction"))   # chosen, or typed into '+ New party'
     return data
 
 

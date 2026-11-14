@@ -9,7 +9,8 @@ from ..models import (ACTIVE, CANCELLED, DELETED, IN, OUT, Account, BalanceAdjus
 from .common import LekkaError, audit, inr, money, parse_date, snapshot, today, user_id
 
 ENTRY_FIELDS = ["title", "amount", "planned_date", "is_settled", "settled_on", "lifecycle",
-                "head_id", "direction", "remarks", "cancel_reason", "reschedule_count", "counterparty_id", "category_id"]
+                "head_id", "direction", "remarks", "cancel_reason", "reschedule_count", "counterparty_id", "category_id",
+                "product_type_id"]
 PAISA = Decimal("0.01")
 MAX_REMARKS = 1000
 
@@ -208,7 +209,7 @@ def _recompute_ancestors(node):
 def create_entry(*, direction, head_id, title, amount, planned_date, remarks=None,
                  cost_centre_id=None, counterparty_id=None, reference_no=None,
                  settled_on=None, template_id=None, occurrence_date=None, audit_action="create",
-                 category_id=None):
+                 category_id=None, product_type_id=None):
     if direction not in (IN, OUT):
         raise LekkaError("Choose inflow or outflow.")
     head = _check_head(head_id, direction=direction)
@@ -217,6 +218,7 @@ def create_entry(*, direction, head_id, title, amount, planned_date, remarks=Non
         planned_date=parse_date(planned_date, "planned date"), remarks=_check_remarks(remarks),
         cost_centre_id=cost_centre_id or None, counterparty_id=counterparty_id or None,
         category_id=_check_category(category_id),
+        product_type_id=_check_type(product_type_id) if direction == IN else None,   # from the product picked
         reference_no=(reference_no or "").strip() or None,
         template_id=template_id, occurrence_date=occurrence_date,
         created_by=user_id(), updated_by=user_id(),
@@ -229,6 +231,12 @@ def create_entry(*, direction, head_id, title, amount, planned_date, remarks=Non
     if audit_action:       # dates made by a recurring template are logged once, on the template
         audit("cashflow_entry", e.id, audit_action, e.remarks, new=snapshot(e, ENTRY_FIELDS))
     return e
+
+
+def _check_type(type_id):
+    from . import product_types
+    t = product_types.get(type_id)
+    return t.id if t else None
 
 
 def _check_category(category_id):
@@ -363,7 +371,7 @@ def _child(parent, p, settled_on=None):
         parent=parent, root_id=parent.root_id, depth=parent.depth + 1,
         direction=parent.direction, head_id=parent.head_id,
         cost_centre_id=parent.cost_centre_id, counterparty_id=parent.counterparty_id,
-        category_id=parent.category_id, title=p["title"], amount=p["amount"], planned_date=p["planned_date"],
+        category_id=parent.category_id, product_type_id=parent.product_type_id, title=p["title"], amount=p["amount"], planned_date=p["planned_date"],
         remarks=p.get("remarks"), created_by=user_id(), updated_by=user_id(),
     )
     if settled_on:
@@ -693,7 +701,9 @@ def read_share(form, amount, revenue_title, revenue_date):
     d = parse_date(form.get("share_date") or revenue_date, "date of the partner's share")
     check_not_before_opening(d, "The date of the partner's share")
     cp = form.get("share_counterparty_id") or None
-    if cp and db.session.get(Counterparty, int(cp)) is None:
+    if not cp:
+        raise LekkaError("Choose the partner (party) for the share.")
+    if db.session.get(Counterparty, int(cp)) is None:
         raise LekkaError("That party no longer exists. Reload and choose again.")
     return {"pct": pct, "amount": part, "head_id": int(form["share_head_id"]), "title": title, "date": d,
             "counterparty_id": int(cp) if cp else None}

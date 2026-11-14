@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from flask import current_app
 
 from ..extensions import db
-from ..models import CashflowEntry, Category, Counterparty, Head, RecurringTemplate, User
+from ..models import CashflowEntry, Category, Counterparty, Head, ProductType, RecurringTemplate, User
 
 LABELS = {
     ("cashflow_entry", "create"): "Added",
@@ -54,6 +54,11 @@ LABELS = {
     ("category", "activate"): "Category activated",
     ("category", "deactivate"): "Category deactivated",
     ("category", "delete"): "Category removed",
+    ("product_type", "create"): "Type added",
+    ("product_type", "edit"): "Type changed",
+    ("product_type", "activate"): "Type activated",
+    ("product_type", "deactivate"): "Type deactivated",
+    ("product_type", "delete"): "Type removed",
     ("price_item", "create"): "Price added",
     ("price_item", "edit"): "Price changed",
     ("price_item", "delete"): "Price removed",
@@ -62,13 +67,13 @@ LABELS = {
 KINDS = {"cashflow_entry": "Item", "recurring_template": "Recurring template", "account": "Account",
          "balance_adjustment": "Adjustment", "head": "Head", "cost_centre": "Cost centre",
          "counterparty": "Party", "price_item": "Price list", "app_user": "User",
-         "category": "Category"}
+         "category": "Category", "product_type": "Type"}
 
 
 # History filters: what the user picks -> which audit rows it means.
 KIND_TABLES = {"items": ["cashflow_entry"], "templates": ["recurring_template"],
                "account": ["account", "balance_adjustment"], "heads": ["head"],
-               "prices": ["price_item", "category"], "vendors": ["counterparty"],
+               "prices": ["price_item", "product_type", "category"], "vendors": ["counterparty"],
                "users": ["app_user"]}
 WHAT_ACTIONS = {
     "added": ["create", "generate", "plan_dates"],
@@ -129,12 +134,13 @@ class Row:
 def _name(h, cache):
     j = h.new_json or h.old_json or {}
     if isinstance(j, dict) and (j.get("title") or j.get("product")
-                                or (h.table_name in ("counterparty", "app_user", "category") and j.get("name"))):
+                                or (h.table_name in ("counterparty", "app_user", "category", "product_type") and j.get("name"))):
         return j.get("title") or j.get("product") or j["name"]
     key = (h.table_name, h.record_id)
     if key not in cache:
         model = {"cashflow_entry": CashflowEntry, "recurring_template": RecurringTemplate, "head": Head,
-                 "counterparty": Counterparty, "app_user": User, "category": Category}.get(h.table_name)
+                 "counterparty": Counterparty, "app_user": User, "category": Category,
+                 "product_type": ProductType}.get(h.table_name)
         obj = db.session.get(model, h.record_id) if model else None
         cache[key] = getattr(obj, "title", None) or getattr(obj, "name", None) or ""
     if h.table_name == "balance_adjustment" and isinstance(j, dict) and j.get("amount"):

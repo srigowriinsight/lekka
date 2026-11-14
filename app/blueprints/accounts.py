@@ -116,7 +116,7 @@ def history():
     return render_template("history.html", rows=rows, page=page, more=len(raw) > size, f=filters,
                            kinds=[("", "Everything"), ("items", "Items"), ("templates", "Recurring templates"),
                                   ("account", "Account and adjustments"), ("heads", "Heads"),
-                                  ("vendors", "Parties"), ("prices", "Price list and categories"),
+                                  ("vendors", "Parties"), ("prices", "Price list, types and categories"),
                                   ("users", "Users")],
                            whats=[("", "Any change"), ("added", "Added"), ("ticked", "Ticked"),
                                   ("unticked", "Unticked"), ("rescheduled", "Rescheduled"), ("split", "Split"),

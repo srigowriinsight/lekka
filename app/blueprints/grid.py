@@ -109,7 +109,7 @@ def cell():
     if request.args.get("entry"):        # an item's own line (Expand all): the same popup, for that item only
         from ..services.entries import get_entry
         items = [get_entry(request.args["entry"])]
-    elif request.args.get("entries"):    # a recurring template's line: its dates in this view (or this column)
+    elif request.args.get("entries"):    # a party's line: its items in this view (or in this column)
         from ..models import CashflowEntry
         ids = [int(x) for x in request.args["entries"].split(",") if x.strip().isdigit()][:200]
         found = [db.session.get(CashflowEntry, i) for i in ids]
@@ -124,7 +124,7 @@ def _review_url(p, endpoint="grid.review", **change):
     """The Review page's URL with its current filters, some of them changed (a list value replaces the list)."""
     q = {"preset": p["preset"], "start": "" if p["preset"] else p["start"].isoformat(),
          "end": "" if p["preset"] else p["end"].isoformat(), "type": p["type"], "status": p["status"],
-         "party": p["parties"], "head": p["heads"], "cat": p["cats"], "group": p["group"]}
+         "party": p["parties"], "head": p["heads"], "cat": p["cats"], "ptype": p["ptypes"], "group": p["group"]}
     q.update(change)
     if change.get("start") or change.get("end"):
         q["preset"] = ""
@@ -141,10 +141,11 @@ def review():
     ch = report.choices()
     names = {"party": {str(c.id): c.name for c in ch["parties"]} | {"none": "No party"},
              "head": {str(h.id): h.path() for h in ch["heads"]},
-             "cat": {str(c.id): c.path() for c in ch["cats"]} | {"none": "No category"}}
+             "cat": {str(c.id): c.path() for c in ch["cats"]} | {"none": "No category"},
+             "ptype": {str(c.id): c.path() for c in ch["ptypes"]} | {"none": "No type"}}
     applied = []                                   # chips for what is filtered, each with an ✕ link
     for key, plist, label in (("party", p["parties"], "Party"), ("head", p["heads"], "Head"),
-                              ("cat", p["cats"], "Category")):
+                              ("cat", p["cats"], "Category"), ("ptype", p["ptypes"], "Type")):
         for v in plist:
             applied.append((f"{label}: {names[key].get(v, v)}",
                             _review_url(p, **{key: [x for x in plist if x != v]})))
@@ -167,20 +168,21 @@ def review_export():
     ws.title = "Review"
     ws.append(["Lekka review", f"{p['start']:%d %b %Y} – {p['end']:%d %b %Y}"])
     ws.append([])
-    ws.append(["Date", "Title", "Party", "Head", "Category", "Money in", "Money out", "Status"])
+    ws.append(["Date", "Title", "Party", "Head", "Category", "Type", "Money in", "Money out", "Status"])
     for c in ws[3]:
         c.font = Font(bold=True)
     from ..services.entries import status_label
     for e in res.rows:
         ws.append([report.when(e), " › ".join(e.path_titles()), e.counterparty.name if e.counterparty else "",
                    e.head.path() if e.head else "", e.category.path() if e.category else "",
+                   e.product_type.path() if e.product_type else "",
                    float(e.amount) if e.direction == "IN" else None,
                    float(e.amount) if e.direction == "OUT" else None, status_label(e)])
         ws.cell(ws.max_row, 1).number_format = "dd-mmm-yyyy"
     ws.append([])
-    ws.append(["Total", "", "", "", "", float(res.money_in), float(res.money_out)])
+    ws.append(["Total", "", "", "", "", "", float(res.money_in), float(res.money_out)])
     ws.cell(ws.max_row, 1).font = Font(bold=True)
-    for col, w in zip("ABCDEFGH", (13, 40, 24, 26, 22, 14, 14, 14)):
+    for col, w in zip("ABCDEFGHI", (13, 40, 24, 26, 22, 22, 14, 14, 14)):
         ws.column_dimensions[col].width = w
     buf = BytesIO()
     wb.save(buf)

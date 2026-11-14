@@ -2,13 +2,13 @@
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from ..extensions import db
-from ..models import Category, PriceItem
+from ..models import PriceItem, ProductType
 from .common import LekkaError, audit, inr, snapshot, user_id
 
 # GST slabs since 22 Sep 2025 (GST 2.0): 0, 5, 18 and 40 (sin and luxury goods); 3 for gold and silver.
 # Any rate from 0 to 100 can still be typed.
 GST_RATES = ["0", "3", "5", "18", "40"]
-FIELDS = ["product", "price", "gst_rate", "remarks", "category_id"]
+FIELDS = ["product", "price", "gst_rate", "remarks", "product_type_id"]
 PAISA = Decimal("0.01")
 
 
@@ -54,12 +54,12 @@ def read(form, current=None):
     if remarks and len(remarks) > 255:
         raise LekkaError("Remarks can be at most 255 characters.")
     out = {"product": product, "price": price, "gst_rate": rate, "remarks": remarks}
-    if "category_id" in form:                 # optional; blank = no category
-        raw = (form.get("category_id") or "").strip()
-        cid = int(raw) if raw else None
-        if cid is not None and db.session.get(Category, cid) is None:
-            raise LekkaError("That category no longer exists. Reload and choose again.")
-        out["category_id"] = cid
+    if "product_type_id" in form:             # optional; blank = no type
+        raw = (form.get("product_type_id") or "").strip()
+        tid = int(raw) if raw else None
+        if tid is not None and db.session.get(ProductType, tid) is None:
+            raise LekkaError("That type no longer exists. Reload and choose again.")
+        out["product_type_id"] = tid
     return out
 
 
@@ -90,9 +90,9 @@ def delete(p: PriceItem):
 
 
 def for_revenue():
-    """Products for the revenue form's drop-down: by category path, then name."""
+    """Products for the revenue form's drop-down: by type, then name."""
     items = PriceItem.query.all()
-    return sorted(items, key=lambda p: ((p.category.path() if p.category else "~"), p.product.lower()))
+    return sorted(items, key=lambda p: ((p.product_type.path() if p.product_type else "~"), p.product.lower()))
 
 
 def summary(p: PriceItem) -> str:

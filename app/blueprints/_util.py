@@ -12,11 +12,20 @@ def is_fetch():
     return request.headers.get("X-Requested-With") == "fetch"
 
 
+def with_root(path):
+    """Lekka may run under a sub-address (https://server/lekka/). A return address that left it off still has to
+    land inside Lekka, so the sub-address is added when missing."""
+    root = request.script_root
+    if root and not (path == root or path.startswith(root + "/") or path.startswith(root + "?")):
+        return root + path
+    return path
+
+
 def safe_next(default="grid.index"):
     nxt = request.values.get("next") or request.referrer or ""
     p = urlparse(nxt)
-    if nxt and not p.netloc and nxt.startswith("/"):
-        return nxt
+    if nxt and not p.netloc and nxt.startswith("/") and not nxt.startswith("//"):
+        return with_root(nxt)
     if p.netloc and p.netloc == request.host:
         return p.path + (f"?{p.query}" if p.query else "")
     return url_for(default)

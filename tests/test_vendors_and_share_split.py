@@ -66,7 +66,7 @@ def test_vendor_list_in_master_data(demo_client):
     assert "Party added" in hist and "Party changed" in hist and "Party removed" in hist
 
 
-def test_vendor_on_items_is_optional_and_offered_by_kind(demo_client):
+def test_party_is_required_on_items_and_offered_by_kind(demo_client):
     c = demo_client
     for name, kind in [("Acme Components", "vendor"), ("Big OEM Ltd", "customer"), ("ABC Partners", "both")]:
         ok(c.post("/master/vendors/add", data={"name": name, "kind_of": kind}, headers=F))
@@ -76,10 +76,11 @@ def test_vendor_on_items_is_optional_and_offered_by_kind(demo_client):
     assert all(n in out_form for n in ("Acme Components", "ABC Partners", "Big OEM Ltd"))
     assert all(n in in_form for n in ("Acme Components", "ABC Partners", "Big OEM Ltd"))
     assert "Party" in out_form and "+ New party" in in_form
-    # optional: no vendor is fine
-    ok(c.post("/entries/new", data={"direction": "OUT", "head_id": head("Factory rent").id, "title": "No vendor item",
-                                    "amount": "1000", "planned_date": "2026-12-10"}, headers=F))
-    assert by_title("No vendor item").counterparty_id is None
+    # required: an item without a party is refused
+    r = c.post("/entries/new", data={"direction": "OUT", "head_id": head("Factory rent").id, "title": "No vendor item",
+                                     "amount": "1000", "planned_date": "2026-12-10", "counterparty_id": ""}, headers=F)
+    assert r.status_code == 400 and "Choose a party" in r.get_json()["error"]
+    assert by_title("No vendor item") is None
     # a new vendor typed into the item lands in the list too
     ok(c.post("/entries/new", data={"direction": "OUT", "head_id": head("Factory rent").id, "title": "Paint job",
                                     "amount": "5000", "planned_date": "2026-12-10", "counterparty_id": "",
@@ -98,11 +99,11 @@ def test_vendor_on_items_is_optional_and_offered_by_kind(demo_client):
     ok(c.post(f"/entries/{e.id}/edit", data={"title": "Paint job", "head_id": e.head_id, "counterparty_id": acme.id,
                                               "version": e.version}, headers=F))
     assert by_title("P2").counterparty_id == acme.id
-    # clearing it
+    # it can't be cleared
     e = by_title("Paint job")
-    ok(c.post(f"/entries/{e.id}/edit", data={"title": "Paint job", "head_id": e.head_id, "counterparty_id": "",
-                                              "version": e.version}, headers=F))
-    assert by_title("Paint job").counterparty_id is None and by_title("P1").counterparty_id is None
+    r = c.post(f"/entries/{e.id}/edit", data={"title": "Paint job", "head_id": e.head_id, "counterparty_id": "",
+                                               "version": e.version}, headers=F)
+    assert r.status_code == 400 and by_title("Paint job").counterparty_id == acme.id
 
 
 def test_vendor_filter_on_expense_page(demo_client):
@@ -117,8 +118,8 @@ def test_vendor_filter_on_expense_page(demo_client):
     c.get("/expenses")                                   # shows (and clears) the 'saved' messages
     page = c.get(f"/expenses?vendor={acme.id}").get_data(as_text=True)
     assert "Acme order" in page and "Other order" not in page and "Acme Components" in page
-    page = c.get("/expenses?vendor=none").get_data(as_text=True)
-    assert "Other order" in page and "Acme order" not in page
+    page = c.get("/expenses?vendor=none").get_data(as_text=True)   # only older items (the demo) have no party
+    assert "Other order" not in page and "Acme order" not in page and "Factory rent" in page
     # combined with head and dates
     page = c.get(f"/expenses?vendor={acme.id}&head={rent.id}&start=2026-12-01&end=2026-12-31").get_data(as_text=True)
     assert "Acme order" not in page
@@ -271,3 +272,21 @@ def test_changing_pct_on_a_split_revenue(demo_client):
     a = by_title("A")
     ok(c.post(f"/entries/{a.id}/amount", data={"amount": "3,00,000", "version": a.version}, headers=F))
     assert by_title("ABC share – A").amount == Decimal("60000") and by_title("ABC share").amount == Decimal("120000")
+
+
+def test_templates_and_partner_shares_need_a_party(demo_client):
+    c = demo_client
+    rent = head("Factory rent")
+    r = c.post("/templates/new", headers=F, data={"title": "Security", "head_id": rent.id, "direction": "OUT",
+                                                  "amount": "5000", "freq": "MONTHLY", "interval_n": "1",
+                                                  "start_date": "2026-12-10", "counterparty_id": ""})
+    assert r.status_code == 400 and "Choose a party" in r.get_json()["error"]
+    sales = head("Product sales")
+    r = c.post("/entries/new", headers=F, data={"direction": "IN", "head_id": sales.id, "title": "Joint order",
+                                                "amount": "100000", "planned_date": "2026-12-10", "share_pct": "50",
+                                                "share_head_id": rent.id, "share_counterparty_id": ""})
+    assert r.status_code == 400 and "partner (party)" in r.get_json()["error"]
+    assert by_title("Joint order") is None
+    # the form no longer calls it optional
+    form = c.get("/entries/new?direction=OUT", headers=F).get_data(as_text=True)
+    assert "(optional)</span></label>\n  <select name=\"counterparty_id\"" not in form and "— Choose —" in form

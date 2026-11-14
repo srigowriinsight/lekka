@@ -1,4 +1,5 @@
 """Every page loads, and the main popups work end to end through HTTP."""
+import re
 from datetime import date
 from decimal import Decimal
 
@@ -568,27 +569,43 @@ def test_cancelling_shared_revenue_cancels_or_shrinks_partner_share(demo_client)
     assert "already ticked as paid" in demo_client.get("/").get_data(as_text=True)
 
 
-def test_recurring_template_is_one_line_in_expanded_grid(demo_client):
-    head = Head.query.filter_by(name="Factory rent").first()
-    demo_client.post("/templates/new", headers=F, data={
-        "title": "House keeping", "head_id": head.id, "direction": "OUT", "amount": "2,000",
-        "freq": "MONTHLY", "interval_n": "1", "anchor_day": "10", "start_date": "2026-12-10"})
-    page = demo_client.get("/?freq=month&start=2026-12-01&end=2027-04-30&expand=1").get_data(as_text=True)
-    lines = [ln for ln in page.split("<tr") if "item-row" in ln and "House keeping" in ln]
-    assert len(lines) == 1, len(lines)                       # one line, not one per month
-    assert lines[0].count(">2,000<") == 5 and "↻" in lines[0]
-    # its title opens the template's dates in this view
+def test_grid_shows_one_line_per_party_under_a_head(demo_client):
+    """Employee welfare: milk bought from several dairies. Each dairy is one line under the head; the titles
+    (Milk, Bread...) show only when hovering on a figure."""
     import re
-    url = re.search(r'data-dialog="([^"]*entries=[^"]+)"', lines[0]).group(1).replace("&amp;", "&")
-    pop = demo_client.get(url, headers=F).get_data(as_text=True)
-    assert pop.count("House keeping") >= 5
-    # a weekly template in a month view: dates in one column are added up, marked ×n
-    demo_client.post("/templates/new", headers=F, data={
-        "title": "Weekly cleaning", "head_id": head.id, "direction": "OUT", "amount": "500",
-        "freq": "WEEKLY", "interval_n": "1", "start_date": "2026-12-01"})
-    page = demo_client.get("/?freq=month&start=2026-12-01&end=2026-12-31&expand=1").get_data(as_text=True)
-    lines = [ln for ln in page.split("<tr") if "item-row" in ln and "Weekly cleaning" in ln]
-    assert len(lines) == 1 and "2,500" in lines[0] and "×5" in lines[0]
+    from app.models import Counterparty
+    from app.services.entries import create_entry
+    c = demo_client
+    c.post("/master/heads/add", data={"name": "Employee welfare", "head_kind": "OUT"}, headers=F)
+    ew = Head.query.filter_by(name="Employee welfare").one()
+    for n in ("Nandini Dairy", "Akshaya Dairy"):
+        c.post("/master/vendors/add", data={"name": n}, headers=F)
+    nandini, akshaya = (Counterparty.query.filter_by(name=n).one().id for n in ("Nandini Dairy", "Akshaya Dairy"))
+    for title, amount, party in (("Milk", "500", nandini), ("Bread", "100", nandini), ("Milk", "600", akshaya)):
+        assert c.post("/entries/new", headers=F, data={"direction": "OUT", "head_id": ew.id, "title": title,
+                                                       "amount": amount, "planned_date": "2026-12-05",
+                                                       "counterparty_id": party}).status_code == 200
+    c.post("/templates/new", headers=F, data={"title": "Milk (monthly)", "head_id": ew.id, "direction": "OUT",
+                                              "amount": "2,000", "freq": "MONTHLY", "interval_n": "1",
+                                              "start_date": "2026-12-10", "counterparty_id": nandini})
+    create_entry(direction="OUT", head_id=ew.id, title="Old tea bill", amount=50,   # saved before party was required
+                 planned_date=__import__("datetime").date(2026, 12, 6))
+    db.session.commit()
+    page = c.get("/?freq=month&start=2026-12-01&end=2027-02-28&expand=1").get_data(as_text=True)
+    lines = [ln for ln in page.split("<tr") if "item-row" in ln and f'data-parent="OUT-{ew.id}"' in ln]
+    names = [re.search(r'item-title[^>]*>([^<]+)', ln).group(1).strip() for ln in lines]
+    assert names == ["Akshaya Dairy", "Nandini Dairy", "No party"]           # A–Z, older items last
+    nd = lines[1]
+    assert ">2,600<" in nd and "×3" in nd and nd.count(">2,000<") == 2 and "↻" in nd   # Dec: 500 + 100 + 2,000
+    assert ">600<" in lines[0] and "×" not in lines[0].split("</td>", 1)[1]
+    # titles are not on the left, only in the hover box of the figures
+    assert "Milk" not in re.search(r'item-title[^>]*>[^<]+', nd).group(0)
+    tip = re.search(r'data-tip="([^"]*)"', nd).group(1)
+    assert "Milk" in tip and "Bread" in tip and "Party:" not in tip and "Head:" not in tip
+    # clicking the party name lists its items in this view
+    url = re.search(r'item-title[^>]*data-dialog="([^"]+)"', nd).group(1).replace("&amp;", "&")
+    pop = c.get(url, headers=F).get_data(as_text=True)
+    assert "Nandini Dairy" in pop and "Bread" in pop and pop.count("<b class=\"\">Milk (monthly)</b>") == 3 and "Akshaya" not in pop
 
 
 def test_template_form_is_simple_and_edit_uses_effective_from(demo_client):
@@ -651,7 +668,8 @@ def test_template_party_and_grid_display(demo_client):
     page = c.get("/?freq=month&start=2026-12-01&end=2027-01-31").get_data(as_text=True)
     # totals are there but hidden until the Inflow / Outflow band is clicked
     assert 'data-total="OUT" hidden' in page and 'class="band js-band"' in page
-    # hover box: title, head and party
-    assert "Party: CleanCo" in page and "Head: Factory rent" in page
+    # each party is a line of its own; on a head's own row (parties mixed) the hover box names the party
+    assert re.search(r'item-title[^>]*>CleanCo', page) and re.search(r'item-title[^>]*>Guard Services', page)
+    assert "Party: CleanCo" in page and "Head: Factory rent" not in page
     # a column where the head has a single line is marked, so its amount shows only on that line when open
     assert "dup" in page

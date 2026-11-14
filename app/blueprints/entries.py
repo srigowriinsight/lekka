@@ -10,7 +10,7 @@ from sqlalchemy import or_
 
 from ..extensions import db
 from ..models import (ACTIVE, CANCELLED, IN, OUT, AuditLog, BalanceAdjustment, CashflowEntry,
-                      CostCentre, Counterparty, Head, RescheduleLog)
+                      CostCentre, Counterparty, Head, PriceItem, RescheduleLog)
 from ..services import entries as svc
 from ..services import vendors
 from ..services.balances import adjustments_between
@@ -167,7 +167,9 @@ def create():
     title = (f.get("title") or "").strip()
     amount = f.get("amount")
     share = svc.read_share(f, amount, title, planned) if direction == IN else None
-    vendor_id = vendors.from_form(f, direction) or None
+    vendor_id = vendors.required_from_form(f, direction)
+    product = (db.session.get(PriceItem, int(f["product_id"]))       # its type goes onto the revenue item
+               if direction == IN and str(f.get("product_id") or "").isdigit() else None)
     if already and f.get("link_choice") is None:
         svc._check_amount(amount)
         svc._check_title(title)
@@ -196,6 +198,7 @@ def create():
                          planned_date=planned, remarks=f.get("remarks"),
                          cost_centre_id=f.get("cost_centre_id") or None,
                          counterparty_id=vendor_id, category_id=f.get("category_id") or None,
+                         product_type_id=product.product_type_id if product else None,
                          reference_no=f.get("reference_no"),
                          settled_on=planned if already else None)
     shared = svc.add_partner_share(e, share) if share else None
@@ -244,7 +247,7 @@ def edit(entry_id):
     before = (e.amount, sum((s.amount for s in svc.partner_shares(e)), Decimal("0"))) if asks_share else None
     svc.edit_entry(e, title=f.get("title"), amount=f.get("amount") if e.is_leaf else None,
                    remarks=f.get("remarks", ""), head_id=_head_from_form(f, e.direction) if e.parent_id is None else None,
-                   counterparty_id=vendors.from_form(f, e.direction) if e.parent_id is None else None,
+                   counterparty_id=vendors.required_from_form(f, e.direction) if e.parent_id is None else None,
                    cost_centre_id=f.get("cost_centre_id") or None,
                    category_id=f.get("category_id") if e.parent_id is None and "category_id" in f else None,
                    reference_no=f.get("reference_no", ""), expected_version=f.get("version"),

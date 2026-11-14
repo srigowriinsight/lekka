@@ -157,8 +157,10 @@ class CashflowEntry(TimestampMixin, db.Model):
     head_id = db.Column(db.Integer, db.ForeignKey("head.id"), nullable=False)
     cost_centre_id = db.Column(db.Integer, db.ForeignKey("cost_centre.id"))
     counterparty_id = db.Column(db.Integer, db.ForeignKey("counterparty.id"))
-    # optional product category (Master data → Categories); set from the product picked on revenue, or by hand
+    # optional category (Master data → Categories), chosen on any expense or revenue item
     category_id = db.Column(db.Integer, db.ForeignKey("category.id", name="fk_entry_category"), index=True)
+    # the type of the product picked on a revenue item (Master data → Types); set only from the product
+    product_type_id = db.Column(db.Integer, db.ForeignKey("product_type.id", name="fk_entry_product_type"), index=True)
     amount = db.Column(Money, nullable=False)
     planned_date = db.Column(db.Date)
     original_planned_date = db.Column(db.Date)
@@ -179,6 +181,7 @@ class CashflowEntry(TimestampMixin, db.Model):
     head = db.relationship("Head")
     counterparty = db.relationship("Counterparty")
     category = db.relationship("Category")
+    product_type = db.relationship("ProductType")
     cost_centre = db.relationship("CostCentre")
     template = db.relationship("RecurringTemplate")
     parent = db.relationship("CashflowEntry", remote_side=[id], back_populates="children", foreign_keys=[parent_id])
@@ -270,17 +273,8 @@ class BalanceSnapshot(TimestampMixin, db.Model):
     remarks = db.Column(db.String(1000))
 
 
-class Category(db.Model):
-    """Product categories for the price list, as a tree (Controllers > PLC > Compact)."""
-    __tablename__ = "category"
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(120), unique=True, nullable=False)
-    parent_id = db.Column(db.Integer, db.ForeignKey("category.id", name="fk_category_parent"), index=True)
-    sort_order = db.Column(db.Integer, default=0, nullable=False)
-    is_active = db.Column(db.Boolean, default=True, nullable=False)
-
-    parent = db.relationship("Category", remote_side=[id],
-                             backref=db.backref("children", order_by="Category.sort_order"))
+class _TreeNode:
+    """A name in a tree (A > B > C): Categories and Types."""
 
     def ancestors(self):
         out, node = [], self.parent
@@ -301,6 +295,33 @@ class Category(db.Model):
         return ids
 
 
+class Category(_TreeNode, db.Model):
+    """Categories for any expense or revenue item (optional), as a tree (Office › Stationery)."""
+    __tablename__ = "category"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey("category.id", name="fk_category_parent"), index=True)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    parent = db.relationship("Category", remote_side=[id],
+                             backref=db.backref("children", order_by="Category.sort_order"))
+
+
+class ProductType(_TreeNode, db.Model):
+    """Types of the products in the price list, as a tree (Controllers › PLC › Compact). A revenue item gets its
+    product's type when a product is picked."""
+    __tablename__ = "product_type"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey("product_type.id", name="fk_product_type_parent"), index=True)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    parent = db.relationship("ProductType", remote_side=[id],
+                             backref=db.backref("children", order_by="ProductType.sort_order"))
+
+
 class PriceItem(TimestampMixin, db.Model):
     """Price list (Master data): a product's price before GST and its GST rate. The GST amount and the
     total are worked out from these two every time, never stored, so they can't disagree."""
@@ -310,9 +331,9 @@ class PriceItem(TimestampMixin, db.Model):
     price = db.Column(Money, nullable=False)                       # before GST
     gst_rate = db.Column(db.Numeric(5, 2), nullable=False, default=Decimal("18"))
     remarks = db.Column(db.String(255))
-    category_id = db.Column(db.Integer, db.ForeignKey("category.id", name="fk_price_item_category"), index=True)
+    product_type_id = db.Column(db.Integer, db.ForeignKey("product_type.id", name="fk_price_item_type"), index=True)
 
-    category = db.relationship("Category")
+    product_type = db.relationship("ProductType")
 
     __table_args__ = (
         CheckConstraint("price >= 0", name="ck_price_item_price"),

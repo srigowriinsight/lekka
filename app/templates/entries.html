@@ -4,7 +4,7 @@
 {% set noun = 'revenue' if is_in else 'expense' %}
 {% block title %}{{ 'Revenue' if is_in else 'Expense' }}{% endblock %}
 {% block content %}
-{% set cur = request.full_path %}
+{% set cur = request.script_root ~ request.full_path %}
 {% macro row(e, level) %}
   {% set s = status(e) %}
   {% set open_leaves = e.leaves()|selectattr('is_settled', 'false')|rejectattr('is_cancelled')|list %}

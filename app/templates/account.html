@@ -2,7 +2,7 @@
 {% from "partials/_m.html" import csrf, nextf, dmy %}
 {% block title %}Account{% endblock %}
 {% block content %}
-{% set cur = request.full_path %}
+{% set cur = request.script_root ~ request.full_path %}
 <h1>Account and balances</h1>
 <div class="row2">
   <div class="panel">

@@ -99,3 +99,11 @@ def from_form(form, direction, field="counterparty_id", new_field="new_vendor"):
     if raw and db.session.get(Counterparty, int(raw)) is None:
         raise LekkaError("That party no longer exists. Reload and choose again.")
     return int(raw) if raw else ""
+
+
+def required_from_form(form, direction, field="counterparty_id", new_field="new_vendor"):
+    """Like from_form, but every item and template must have a party (the grid shows items by party)."""
+    v = from_form(form, direction, field, new_field)
+    if not v:
+        raise LekkaError("Choose a party, or add a new one.")
+    return v

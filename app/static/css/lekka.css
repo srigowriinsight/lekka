@@ -223,6 +223,7 @@ dialog#pop::backdrop { background: rgba(20, 22, 26, .28); }
 
 .grid tr.item-row td.item-title[data-dialog] { cursor: pointer; }
 .grid tr.item-row td.item-title[data-dialog]:hover { color: var(--accent); text-decoration: underline; }
+.grid tr.item-row td.item-title.no-party { font-style: italic; color: var(--muted); }
 .grid tr.item-row td.num[data-dialog]:hover { background: #f2f2f2; }
 
 /* long popups (e.g. a reset preview) scroll inside the window */

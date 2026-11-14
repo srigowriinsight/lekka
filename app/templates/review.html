@@ -2,7 +2,7 @@
 {% from "partials/_m.html" import pill, dm, csrf, nextf %}
 {% block title %}Review{% endblock %}
 {% block content %}
-{% set cur = request.full_path %}
+{% set cur = request.script_root ~ request.full_path %}
 {% macro check_list(name, items, selected, extra=None) %}
   {% for v, l in (extra or []) %}<label class="opt"><input type="checkbox" name="{{ name }}" value="{{ v }}" {{ 'checked' if v in selected }}> <i>{{ l }}</i></label>{% endfor %}
   {% for x in items %}<label class="opt" style="padding-left:{{ 8 + (x.depth or 0) * 16 }}px"><input type="checkbox" name="{{ name }}" value="{{ x.id }}" {{ 'checked' if x.id|string in selected }}> {{ x.name }}</label>{% endfor %}
@@ -53,6 +53,13 @@
         <div class="dd-list">{{ check_list('cat', ch.cats, p.cats, [('none', 'No category')]) }}</div>
       </div>
     </details>
+    <details class="dd">
+      <summary>Type{% if p.ptypes %} <b>· {{ p.ptypes|length }}</b>{% endif %}</summary>
+      <div class="dd-box">
+        <input type="search" class="dd-find" placeholder="Find" aria-label="Find a type">
+        <div class="dd-list">{{ check_list('ptype', ch.ptypes, p.ptypes, [('none', 'No type')]) }}</div>
+      </div>
+    </details>
     <select name="group" aria-label="Group by">
       {% for k, l in groups %}<option value="{{ k }}" {{ 'selected' if p.group == k }}>{{ 'Group by: ' ~ l if k else l }}</option>{% endfor %}
     </select>
@@ -81,24 +88,25 @@
     <td>{{ e.counterparty.name if e.counterparty else '' }}</td>
     <td class="muted">{{ e.head.path() if e.head else '' }}</td>
     <td class="muted">{{ e.category.path() if e.category else '' }}</td>
+    <td class="muted">{{ e.product_type.path() if e.product_type else '' }}</td>
     <td class="num {{ 'amt-in' if e.direction == 'IN' else 'amt-out' }}">{{ '+' if e.direction == 'IN' else '−' }}₹{{ e.amount|inr }}</td>
     <td>{{ pill(e) }}</td>
   </tr>
 {% endmacro %}
 
 <table class="list rv-table">
-  <thead><tr><th>Date</th><th>Title</th><th>Party</th><th>Head</th><th>Category</th><th class="num">Amount</th><th>Status</th></tr></thead>
+  <thead><tr><th>Date</th><th>Title</th><th>Party</th><th>Head</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Status</th></tr></thead>
   <tbody>
   {% if res.groups %}
     {% for g in res.groups %}
-      <tr class="rv-group"><td colspan="5">{{ g.label }} <span class="muted">· {{ g.rows|length }}</span></td>
+      <tr class="rv-group"><td colspan="6">{{ g.label }} <span class="muted">· {{ g.rows|length }}</span></td>
         <td class="num">{% if g.money_in %}<span class="amt-in">+₹{{ g.money_in|inr }}</span>{% endif %}{% if g.money_in and g.money_out %}<br>{% endif %}{% if g.money_out %}<span class="amt-out">−₹{{ g.money_out|inr }}</span>{% endif %}</td><td></td></tr>
       {% for e in g.rows %}{{ row(e) }}{% endfor %}
     {% endfor %}
   {% else %}
     {% for e in res.rows %}{{ row(e) }}{% endfor %}
   {% endif %}
-  {% if not res.rows %}<tr><td colspan="7" class="muted" style="padding:18px;text-align:center">Nothing matches these filters.</td></tr>{% endif %}
+  {% if not res.rows %}<tr><td colspan="8" class="muted" style="padding:18px;text-align:center">Nothing matches these filters.</td></tr>{% endif %}
   </tbody>
 </table>
 

@@ -2,20 +2,21 @@
 {% from "partials/_m.html" import csrf, nextf %}
 {% block title %}Master data{% endblock %}
 {% block content %}
-{% set cur = request.full_path %}
+{% set cur = request.script_root ~ request.full_path %}
 <h1>Master data</h1>
 <div class="chips" style="margin-bottom:12px">
   <a href="{{ url_for('heads.index', tab='heads') }}" class="{{ 'on' if tab == 'heads' }}">Heads</a>
   <a href="{{ url_for('heads.index', tab='parties') }}" class="{{ 'on' if tab == 'parties' }}">Parties</a>
   <a href="{{ url_for('heads.index', tab='categories') }}" class="{{ 'on' if tab == 'categories' }}">Categories</a>
   <a href="{{ url_for('heads.index', tab='prices') }}" class="{{ 'on' if tab == 'prices' }}">Price list</a>
+  <a href="{{ url_for('heads.index', tab='types') }}" class="{{ 'on' if tab == 'types' }}">Types</a>
   {% if show_cc %}
   <a href="{{ url_for('heads.index', tab='cost_centres') }}" class="{{ 'on' if tab == 'cost_centres' }}">Cost centres</a>
   {% endif %}
 </div>
 
 {% if tab == 'heads' %}
-  <p class="muted" style="margin-top:0">Heads are the categories in the grid and on the Expense and Revenue pages, arranged as a tree like the OPEX sheet: a head can have sub-heads, and a parent's figures in the grid include its sub-heads. <b>For</b> says where a head is offered: <b>Expense</b> heads on expenses, <b>Revenue</b> heads on revenue, <b>Both</b> on either. Sub-heads of an expense or revenue head are of the same kind. Heads are listed in A–Z order; heads in use are deactivated, never deleted.</p>
+  <p class="muted" style="margin-top:0">Heads are the groups in the grid and on the Expense and Revenue pages, arranged as a tree like the OPEX sheet: a head can have sub-heads, and a parent's figures in the grid include its sub-heads. <b>For</b> says where a head is offered: <b>Expense</b> heads on expenses, <b>Revenue</b> heads on revenue, <b>Both</b> on either. Sub-heads of an expense or revenue head are of the same kind. Heads are listed in A–Z order; heads in use are deactivated, never deleted.</p>
   <form method="post" action="{{ url_for('heads.add', kind='heads') }}" id="add-head" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
     {{ csrf() }}{{ nextf(url_for('heads.index')) }}
     <input name="name" placeholder="New head, e.g. Packing material" style="min-width:300px" required {{ 'autofocus' if under }}>
@@ -118,65 +119,72 @@
     {% else %}<tr><td colspan="5" class="muted" style="padding:14px">No parties yet. Add the first one above, or type a new one straight into an expense or revenue item.</td></tr>{% endfor %}
     </tbody>
   </table>
-{% elif tab == 'categories' %}
-  {% set back = url_for('heads.index', tab='categories') %}
-  <p class="muted" style="margin-top:0">Categories group the products in the price list. A category can have sub-categories, as deep as needed (Controllers › PLC › Compact). Choose the category of each product in the Price list. Categories are listed in A–Z order.</p>
-  <form method="post" action="{{ url_for('heads.add_category') }}" class="price-add" id="add-category">
+{% elif tree %}
+  {% set back = url_for('heads.index', tab=tree.kind) %}
+  {% set noun, Noun = tree.noun, tree.noun|capitalize %}
+  {% if tree.kind == 'categories' %}
+  <p class="muted" style="margin-top:0">Optional on any expense or revenue item.</p>
+  {% else %}
+  <p class="muted" style="margin-top:0">Types of the products in the price list. A revenue item takes its product's type.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('heads.add_tree', kind=tree.kind) }}" class="price-add" id="add-{{ noun }}">
     {{ csrf() }}{{ nextf(back) }}
-    <label>Name<input name="name" required maxlength="120" placeholder="e.g. PLC controllers" style="min-width:260px" {{ 'autofocus' if not categories }}></label>
+    <label>Name<input name="name" required maxlength="120" placeholder="{{ 'e.g. Office supplies' if tree.kind == 'categories' else 'e.g. PLC controllers' }}" style="min-width:260px" {{ 'autofocus' if not tree.rows }}></label>
     <label>Under<select name="parent_id" style="display:block;margin-top:3px">
       <option value="">— Top level —</option>
-      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if request.args.get('under')|string == c.id|string }}>{{ cat_label(c) }}</option>{% endfor %}
+      {% for c in tree.rows %}<option value="{{ c.id }}" {{ 'selected' if request.args.get('under')|string == c.id|string }}>{{ tree_label(c) }}</option>{% endfor %}
     </select></label>
-    <button class="primary">+ Add category</button>
+    <button class="primary">+ Add {{ noun }}</button>
   </form>
   <table class="list price-list">
-    <thead><tr><th>Category</th><th>Under</th><th class="num">Products</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>{{ Noun }}</th><th>Under</th>{% if tree.kind == 'types' %}<th class="num">Products</th>{% endif %}<th class="num">Items</th><th>Status</th><th></th></tr></thead>
     <tbody>
-    {% for c in categories %}
+    {% for c in tree.rows %}
       {% set fid = 'c' ~ c.id %}
+      {% set use = tree.usage[c.id] %}
       <tr>
         <td>
-          <form method="post" id="{{ fid }}" action="{{ url_for('heads.update_category', cat_id=c.id) }}">{{ csrf() }}{{ nextf(back) }}</form>
+          <form method="post" id="{{ fid }}" action="{{ url_for('heads.update_tree', kind=tree.kind, node_id=c.id) }}">{{ csrf() }}{{ nextf(back) }}</form>
           <div style="display:flex;gap:6px;align-items:center;padding-left:{{ c.depth * 22 }}px">
             {% if c.depth %}<span class="muted">↳</span>{% endif %}
-            <input name="name" form="{{ fid }}" value="{{ c.name }}" maxlength="120" aria-label="Name" style="flex:1;max-width:320px;{{ 'font-weight:600' if c.children }}" class="{{ 'struck' if not c.is_active }}">
+            <input name="name" form="{{ fid }}" value="{{ c.name }}" maxlength="120" aria-label="Name" style="flex:1;max-width:320px;font-weight:{{ 700 if c.children else 600 }}" class="{{ 'struck' if not c.is_active }}">
           </div>
         </td>
         <td><select name="parent_id" form="{{ fid }}" aria-label="Under">
           <option value="">— Top level —</option>
-          {% for p in categories if p.id not in c.subtree_ids() %}<option value="{{ p.id }}" {{ 'selected' if c.parent_id == p.id }}>{{ cat_label(p) }}</option>{% endfor %}
+          {% for p in tree.rows if p.id not in c.subtree_ids() %}<option value="{{ p.id }}" {{ 'selected' if c.parent_id == p.id }}>{{ tree_label(p) }}</option>{% endfor %}
         </select></td>
-        <td class="num">{% if cat_products.get(c.id) %}<a href="{{ url_for('heads.index', tab='prices', cat=c.id) }}">{{ cat_products[c.id] }}</a>{% else %}0{% endif %}</td>
+        {% if tree.kind == 'types' %}<td class="num">{% if use.products %}<a href="{{ url_for('heads.index', tab='prices', type=c.id) }}">{{ use.products }}</a>{% else %}0{% endif %}</td>{% endif %}
+        <td class="num">{{ use['items'] }}</td>
         <td>{{ 'Active' if c.is_active else 'Inactive' }}</td>
         <td class="acts">
           <button class="small" form="{{ fid }}">Save</button>
-          <a class="btn small" href="#" data-dialog="{{ url_for('heads.new_category_form', under=c.id, next=url_for('heads.index', tab='categories')) }}" title="Add a category inside '{{ c.name }}'">+ Sub-category</a>
-          <form method="post" action="{{ url_for('heads.update_category', cat_id=c.id) }}" style="display:inline">
+          <a class="btn small" href="#" data-dialog="{{ url_for('heads.new_tree_form', kind=tree.kind, under=c.id, next=back) }}" title="Add a {{ noun }} inside '{{ c.name }}'">+ Sub-{{ noun }}</a>
+          <form method="post" action="{{ url_for('heads.update_tree', kind=tree.kind, node_id=c.id) }}" style="display:inline">
             {{ csrf() }}{{ nextf(back) }}<input type="hidden" name="toggle" value="1">
             <button class="small">{{ 'Deactivate' if c.is_active else 'Activate' }}</button>
           </form>
-          {% if not cat_products.get(c.id) and not c.children %}
-          <form method="post" action="{{ url_for('heads.delete_category', cat_id=c.id) }}" style="display:inline">
+          {% if not use.values()|sum and not c.children %}
+          <form method="post" action="{{ url_for('heads.delete_tree', kind=tree.kind, node_id=c.id) }}" style="display:inline">
             {{ csrf() }}{{ nextf(back) }}
-            <button class="small danger-quiet" data-confirm="Remove the category '{{ c.name }}'?">Delete</button>
+            <button class="small danger-quiet" data-confirm="Remove the {{ noun }} '{{ c.name }}'?">Delete</button>
           </form>
           {% endif %}
         </td>
       </tr>
-    {% else %}<tr><td colspan="5" class="muted" style="padding:14px">No categories yet. Add the first one above.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="6" class="muted" style="padding:14px">No {{ 'categories' if tree.kind == 'categories' else 'types' }} yet. Add the first one above.</td></tr>{% endfor %}
     </tbody>
   </table>
 {% elif tab == 'prices' %}
   {% set back = url_for('heads.index', tab='prices') %}
-  <p class="muted" style="margin-top:0">Prices of the products we sell or buy often. Enter the price before GST and pick the GST %; the GST and the total price are worked out for you. Tick <b>Price includes GST</b> to type the total instead, and Lekka works back the price before GST. Categories come from Master data → Categories. On a new revenue item you can pick a product and its total price fills the amount.</p>
+  <p class="muted" style="margin-top:0">Enter the price before GST, or tick <b>Price includes GST</b> to type the total.</p>
   <datalist id="gst-rates">{% for r in gst_rates %}<option value="{{ r }}">{% endfor %}</datalist>
   <form method="post" action="{{ url_for('heads.add_price') }}" class="js-gst price-add" id="add-price">
     {{ csrf() }}{{ nextf(back) }}
     <label>Product<input name="product" placeholder="e.g. PLC controller CX-200" required style="min-width:240px" {{ 'autofocus' if not prices }}></label>
-    <label>Category<select name="category_id" style="display:block;margin-top:3px;max-width:200px">
+    <label>Type<select name="product_type_id" style="display:block;margin-top:3px;max-width:200px">
       <option value="">— None —</option>
-      {% for c in cat_choices %}<option value="{{ c.id }}" {{ 'selected' if price_cat == c.id|string }}>{{ cat_label(c) }}</option>{% endfor %}
+      {% for c in type_choices %}<option value="{{ c.id }}" {{ 'selected' if price_type == c.id|string }}>{{ tree_label(c) }}</option>{% endfor %}
     </select></label>
     <label>Price (₹)<input name="price" inputmode="decimal" placeholder="0.00" required style="width:130px" class="num"></label>
     <label>GST %<input name="gst_rate" list="gst-rates" value="18" inputmode="decimal" required style="width:70px" class="num"></label>
@@ -190,25 +198,25 @@
   <form method="get" style="display:flex;gap:6px;align-items:center;margin:4px 0 8px;flex-wrap:wrap">
     <input type="hidden" name="tab" value="prices">
     <input type="search" class="js-price-search" placeholder="Search products" aria-label="Search products" style="min-width:260px">
-    <select name="cat" aria-label="Category" onchange="this.form.submit()">
-      <option value="">All categories</option>
-      <option value="none" {{ 'selected' if price_cat == 'none' }}>No category</option>
-      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if price_cat == c.id|string }}>{{ cat_label(c) }}</option>{% endfor %}
+    <select name="type" aria-label="Type" onchange="this.form.submit()">
+      <option value="">All types</option>
+      <option value="none" {{ 'selected' if price_type == 'none' }}>No type</option>
+      {% for c in types %}<option value="{{ c.id }}" {{ 'selected' if price_type == c.id|string }}>{{ tree_label(c) }}</option>{% endfor %}
     </select>
   </form>
   <table class="list price-list">
-    <thead><tr><th>Product</th><th>Category</th><th class="num">Price (before GST)</th><th class="num">GST %</th><th class="num">GST</th><th class="num">Total price</th><th></th></tr></thead>
+    <thead><tr><th>Product</th><th>Type</th><th class="num">Price (before GST)</th><th class="num">GST %</th><th class="num">GST</th><th class="num">Total price</th><th></th></tr></thead>
     <tbody>
     {% for p in prices %}
       {% set fid = 'p' ~ p.id %}
-      <tr class="js-gst" data-product="{{ p.product|lower }} {{ (p.category.path()|lower) if p.category else '' }}">
+      <tr class="js-gst" data-product="{{ p.product|lower }} {{ (p.product_type.path()|lower) if p.product_type else '' }}">
         <td>
           <form method="post" id="{{ fid }}" action="{{ url_for('heads.update_price', item_id=p.id) }}">{{ csrf() }}{{ nextf(back) }}</form>
           <input name="product" form="{{ fid }}" value="{{ p.product }}" aria-label="Product" style="width:100%;min-width:200px">
         </td>
-        <td><select name="category_id" form="{{ fid }}" aria-label="Category" style="max-width:190px">
+        <td><select name="product_type_id" form="{{ fid }}" aria-label="Type" style="max-width:190px">
           <option value="">— None —</option>
-          {% for c in categories if c.is_active or c.id == p.category_id %}<option value="{{ c.id }}" {{ 'selected' if p.category_id == c.id }}>{{ cat_label(c) }}</option>{% endfor %}
+          {% for c in types if c.is_active or c.id == p.product_type_id %}<option value="{{ c.id }}" {{ 'selected' if p.product_type_id == c.id }}>{{ tree_label(c) }}</option>{% endfor %}
         </select></td>
         <td class="num"><input name="price" form="{{ fid }}" value="{{ '%.2f'|format(p.price) }}" inputmode="decimal" aria-label="Price before GST" class="num" style="width:120px"></td>
         <td class="num"><input name="gst_rate" form="{{ fid }}" value="{{ '{:f}'.format(p.gst_rate.normalize()) }}" list="gst-rates" inputmode="decimal" aria-label="GST %" class="num" style="width:64px"></td>
@@ -222,7 +230,7 @@
           </form>
         </td>
       </tr>
-    {% else %}<tr><td colspan="7" class="muted" style="padding:14px">{{ 'No products in this category.' if price_cat else 'No products yet. Add the first one above.' }}</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7" class="muted" style="padding:14px">{{ 'No products of this type.' if price_type else 'No products yet. Add the first one above.' }}</td></tr>{% endfor %}
     </tbody>
   </table>
 {% else %}

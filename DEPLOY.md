@@ -106,6 +106,20 @@ with Windows notes at the end.
 
    Serving plain HTTP only? Then leave `LEKKA_BEHIND_PROXY` out of `.env`, or the login cookie is not sent.
 
+   **Under a sub-address** (`https://server/lekka/` instead of its own name)? Lekka has to know the sub-address,
+   or links and the page shown after saving point to the server's root and give 404. Either start waitress with
+   `--url-prefix=/lekka`, or keep `LEKKA_BEHIND_PROXY=1` and have nginx pass it:
+
+   ```nginx
+   location /lekka/ {
+       proxy_pass http://127.0.0.1:8000/;
+       proxy_set_header X-Forwarded-Prefix /lekka;
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+   }
+   ```
+
 ---
 
 ## After deployment

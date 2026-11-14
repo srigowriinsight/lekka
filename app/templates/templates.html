@@ -2,7 +2,7 @@
 {% from "partials/_m.html" import csrf, nextf, dm, dmy %}
 {% block title %}Recurring templates{% endblock %}
 {% block content %}
-{% set cur = request.full_path %}
+{% set cur = request.script_root ~ request.full_path %}
 {% set freq_names = {'DAILY': 'Daily', 'WEEKLY': 'Weekly', 'MONTHLY': 'Monthly', 'QUARTERLY': 'Quarterly', 'YEARLY': 'Yearly'} %}
 {% set weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">

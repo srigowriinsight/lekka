@@ -22,6 +22,7 @@
       <div class="row2"><div>{{ vendor_field(vendors, e.direction, e.counterparty_id) }}</div>
         <div>{{ category_field(categories, cat_label, e.category_id) }}</div></div>
     {% endif %}
+    {% if e.product_type %}<p class="muted" style="margin:6px 0 0;font-size:12.5px">Type: {{ e.product_type.path() }} (from the product picked)</p>{% endif %}
     {% if e.is_leaf %}
       <label>Amount (₹)</label>
       <input name="amount" class="full" value="{{ new_amount or (e.amount|inr) }}" {{ 'autofocus' if new_amount }}>

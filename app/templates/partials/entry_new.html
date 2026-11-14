@@ -22,13 +22,13 @@
     {% if products %}
     <div class="product-row">
     <div><label>Product from the price list <span class="muted" style="font-weight:400">(optional)</span></label>
-    <select class="full js-product" aria-label="Product">
+    <select name="product_id" class="full js-product" aria-label="Product">
       <option value="">— None —</option>
       {% set ns = namespace(cat=None) %}
       {% for p in products %}
-        {% set cat = p.category.path() if p.category else 'No category' %}
+        {% set cat = p.product_type.path() if p.product_type else 'No type' %}
         {% if cat != ns.cat %}{% if ns.cat is not none %}</optgroup>{% endif %}<optgroup label="{{ cat }}">{% set ns.cat = cat %}{% endif %}
-        <option value="{{ p.id }}" data-total="{{ p.total }}" data-name="{{ p.product }}" data-category="{{ p.category_id or '' }}">{{ p.product }} · ₹{{ p.total|inr }} incl. {{ '{:f}'.format(p.gst_rate.normalize()) }}% GST</option>
+        <option value="{{ p.id }}" data-total="{{ p.total }}" data-name="{{ p.product }}">{{ p.product }} · ₹{{ p.total|inr }} incl. {{ '{:f}'.format(p.gst_rate.normalize()) }}% GST</option>
       {% endfor %}
       {% if ns.cat is not none %}</optgroup>{% endif %}
     </select></div>
