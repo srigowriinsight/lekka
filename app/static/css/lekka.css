@@ -79,12 +79,12 @@ label { display: block; font-size: 12.5px; color: var(--muted); margin: 8px 0 3p
   max-height: calc(100vh - 170px); }
 table.grid { border-collapse: separate; border-spacing: 0; width: max-content; }
 .grid th, .grid td { border-bottom: 1px solid var(--line-2); border-right: 1px solid var(--line-2); padding: 5px 8px;
-  min-width: 108px; }
+  min-width: 118px; }
 .grid thead th { position: sticky; top: 0; background: var(--panel); z-index: 3; font-weight: 600; font-size: 13px;
   border-bottom: 1px solid var(--line); text-align: right; }
 .grid .rowhead { position: sticky; left: 0; background: var(--panel); z-index: 2; text-align: left; min-width: 230px;
   max-width: 300px; border-right: 1px solid var(--line); }
-.grid.freq-day th, .grid.freq-day td { min-width: 100px; }
+.grid.freq-day th, .grid.freq-day td { min-width: 110px; }
 .grid.freq-day .rowhead { min-width: 210px; }
 .grid thead th { white-space: nowrap; }
 .grid thead .rowhead { z-index: 4; }
@@ -107,7 +107,10 @@ table.grid { border-collapse: separate; border-spacing: 0; width: max-content; }
 .grid td.cell { position: relative; text-align: right; cursor: pointer; font-variant-numeric: tabular-nums; }
 .grid td.cell:hover { background: #f7f9fd; }
 .grid td.cell.empty { cursor: copy; }
-.grid td.cell .cnt { float: left; color: var(--muted); font-size: 11px; margin-top: 1px; }
+.grid td.cell .cnt { float: left; color: var(--muted); font-size: 12px; margin-top: 2px; }
+/* figures: a size up from the rest of the page so amounts read easily */
+.grid td.cell, .grid tr.bal td:not(.rowhead), .grid tr.total td:not(.rowhead), .grid tr.adj td:not(.rowhead) { font-size: 15.5px; }
+.grid tr.basis td:not(.rowhead) { font-size: 12.5px; }
 .grid td.cell .amt { font-weight: 600; }
 .grid td.cell .bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; margin-top: 4px; background: var(--plan-soft); }
 .bar .b-SETTLED { background: var(--ok); } .bar .b-DUE_SOON { background: var(--warn); }
@@ -123,7 +126,8 @@ table.grid { border-collapse: separate; border-spacing: 0; width: max-content; }
 .grid .toggle { border: 0; background: none; padding: 0 4px 0 0; color: var(--muted); cursor: pointer; width: 16px; }
 .grid .addhere { float: right; color: var(--muted); padding: 0 4px; border-radius: 4px; }
 .grid .addhere:hover { background: var(--band); text-decoration: none; }
-.grid tr.item-row td { font-size: 12.5px; color: #3a3e45; background: #fcfcfb; }
+.grid tr.item-row td { font-size: 14.5px; color: #3a3e45; background: #fcfcfb; }
+.grid tr.item-row td.rowhead { font-size: 13.5px; }
 .grid tr.item-row td.rowhead { padding-left: 30px; background: #fcfcfb; font-weight: 400; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .grid tr.item-row td.c-SETTLED { color: var(--ok); } .grid tr.item-row td.c-OVERDUE { color: var(--bad); }
